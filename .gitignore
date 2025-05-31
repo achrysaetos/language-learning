@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# language learning app specific ignores
+/public/audio/*.mp3
+/speech_files/
