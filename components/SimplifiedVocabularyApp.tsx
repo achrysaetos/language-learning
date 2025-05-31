@@ -4,10 +4,7 @@ import { Word, WordStatus, Language } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -29,9 +26,15 @@ import {
   X,
   RefreshCw,
   Filter,
-  Globe
+  Globe,
+  ChevronDown,
+  MoreHorizontal,
+  Info,
+  Sparkles
 } from 'lucide-react';
 import { getLanguageDisplayNames, getAllLanguageConfigs } from '@/lib/languageConfigs';
+import { cn } from '@/lib/utils';
+import { motion, AnimatePresence } from 'framer-motion';
 
 /**
  * SimplifiedVocabularyApp component
@@ -71,6 +74,7 @@ export default function SimplifiedVocabularyApp() {
   const [currentExplanationWord, setCurrentExplanationWord] = useState<Word | null>(null);
   const [autoGenerate, setAutoGenerate] = useState(false);
   const [statusFilter, setStatusFilter] = useState<WordStatus | 'all'>('all');
+  const [showFilters, setShowFilters] = useState(false);
 
   // Audio player state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -85,6 +89,7 @@ export default function SimplifiedVocabularyApp() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const wordListRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Get current word
   const currentWord = currentWordId ? wordsMap[currentWordId] : null;
@@ -219,6 +224,11 @@ export default function SimplifiedVocabularyApp() {
           console.error('Error auto-generating audio:', err);
         });
       }
+      
+      // Focus the input field after adding
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add word');
     }
@@ -260,6 +270,11 @@ export default function SimplifiedVocabularyApp() {
           console.error('Error auto-generating audio batch:', err);
         });
       }
+      
+      // Focus the input field after adding
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add words');
     }
@@ -400,19 +415,35 @@ export default function SimplifiedVocabularyApp() {
     setIsPlaying(false);
   }, [setCurrentLanguage]);
 
-  // Render status badge for a word
-  const renderStatusBadge = (status: WordStatus) => {
+  // Get status color for a word
+  const getStatusColor = (status: WordStatus) => {
     switch (status) {
       case WordStatus.COMPLETE:
-        return <Badge className="bg-green-500"><CheckCircle className="w-3 h-3 mr-1" /> Complete</Badge>;
+        return 'bg-emerald-500';
       case WordStatus.GENERATING:
-        return <Badge className="bg-blue-500"><Clock className="w-3 h-3 mr-1" /> Generating</Badge>;
+        return 'bg-blue-500';
       case WordStatus.PENDING:
-        return <Badge className="bg-yellow-500"><Clock className="w-3 h-3 mr-1" /> Pending</Badge>;
+        return 'bg-amber-500';
       case WordStatus.ERROR:
-        return <Badge className="bg-red-500"><AlertCircle className="w-3 h-3 mr-1" /> Error</Badge>;
+        return 'bg-rose-500';
       default:
-        return <Badge variant="outline">Not Generated</Badge>;
+        return 'bg-gray-300';
+    }
+  };
+
+  // Get status tooltip text for a word
+  const getStatusTooltip = (status: WordStatus) => {
+    switch (status) {
+      case WordStatus.COMPLETE:
+        return 'Audio ready';
+      case WordStatus.GENERATING:
+        return 'Generating audio...';
+      case WordStatus.PENDING:
+        return 'Waiting to generate';
+      case WordStatus.ERROR:
+        return 'Error generating audio';
+      default:
+        return 'No audio generated';
     }
   };
 
@@ -427,285 +458,413 @@ export default function SimplifiedVocabularyApp() {
   }, []);
 
   return (
-    <div className="container mx-auto py-8 relative">
+    <div className="py-6 relative max-w-4xl mx-auto">
       {/* Hidden audio element for playback */}
       <audio ref={audioRef} />
 
-      {/* Add Words Section */}
-      <Card className="mb-8">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>{languageDisplayNames[currentLanguage]} Vocabulary</CardTitle>
-            <CardDescription>
-              Add words, generate audio, and listen to pronunciations
-            </CardDescription>
+      {/* Floating Header */}
+      <div className="sticky top-0 z-30 bg-background/80 backdrop-blur-md py-3 mb-8">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <Globe className="h-5 w-5 text-primary" />
+            <select 
+              className="bg-transparent border-none text-lg font-medium focus:outline-none focus:ring-0 p-0 pr-6 appearance-none"
+              value={currentLanguage}
+              onChange={handleLanguageChange}
+              style={{ backgroundPosition: 'right 0 center' }}
+            >
+              {languageConfigs.map(config => (
+                <option key={config.code} value={config.code}>
+                  {config.displayName}
+                </option>
+              ))}
+            </select>
           </div>
+          
           <div className="flex items-center space-x-4">
-            {/* Language Selection Dropdown */}
-            <div className="flex items-center space-x-2">
-              <Globe className="h-4 w-4 text-muted-foreground" />
-              <select 
-                className="p-2 border rounded-md text-sm"
-                value={currentLanguage}
-                onChange={handleLanguageChange}
-              >
-                {languageConfigs.map(config => (
-                  <option key={config.code} value={config.code}>
-                    {config.displayName}
-                  </option>
-                ))}
-              </select>
+            <div className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">{currentLanguageGeneratedCount}</span>
+              <span className="mx-1 opacity-50">/</span>
+              <span>{currentLanguageWordCount}</span>
+              <span className="ml-1 opacity-70">with audio</span>
             </div>
             
-            {/* Auto-generate Toggle */}
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="flex items-center space-x-2">
-                    <label htmlFor="auto-generate" className="text-sm">
-                      Auto-generate audio
-                    </label>
+                    <span className="text-sm">Auto</span>
                     <Switch 
                       id="auto-generate" 
                       checked={autoGenerate}
                       onCheckedChange={setAutoGenerate}
+                      className="data-[state=checked]:bg-primary"
                     />
                   </div>
                 </TooltipTrigger>
-                <TooltipContent>
-                  <p>Automatically generate audio when adding new words</p>
+                <TooltipContent side="bottom">
+                  <p>Automatically generate audio when adding words</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    onClick={() => setShowFilters(!showFilters)}
+                    className={cn(
+                      "rounded-full transition-all",
+                      showFilters && "bg-primary/10 text-primary"
+                    )}
+                  >
+                    <Filter className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p>Show/hide filters</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
-        </CardHeader>
-        <CardContent>
+        </div>
+        
+        {/* Hero Input Section */}
+        <div className="mt-4">
           {showBulkInput ? (
-            <div className="space-y-4">
-              <Textarea
-                placeholder={`Enter multiple ${languageDisplayNames[currentLanguage]} words separated by spaces, commas, or new lines`}
-                value={bulkWords}
-                onChange={(e) => setBulkWords(e.target.value)}
-                rows={5}
-                className="w-full"
-              />
-              <div className="flex space-x-2">
-                <Button onClick={handleAddBulkWords}>
+            <div className="space-y-2">
+              <div className="relative">
+                <Textarea
+                  placeholder={`Enter multiple ${languageDisplayNames[currentLanguage]} words separated by spaces, commas, or new lines`}
+                  value={bulkWords}
+                  onChange={(e) => setBulkWords(e.target.value)}
+                  rows={3}
+                  className="w-full pr-24 resize-none rounded-xl border-muted bg-background/50 focus-visible:ring-primary"
+                />
+                <div className="absolute right-2 top-2 flex space-x-1">
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    onClick={() => setShowBulkInput(false)}
+                    className="h-8 rounded-full"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="flex justify-end">
+                <Button 
+                  onClick={handleAddBulkWords}
+                  className="rounded-full bg-primary hover:bg-primary/90"
+                >
                   <Plus className="w-4 h-4 mr-2" />
-                  Add Words
-                </Button>
-                <Button variant="outline" onClick={() => setShowBulkInput(false)}>
-                  Cancel
+                  Add {bulkWords.split(/[\s,，]+/).filter(w => w.trim().length > 0).length} Words
                 </Button>
               </div>
             </div>
           ) : (
-            <div className="flex space-x-2">
+            <div className="relative">
               <Input
-                placeholder={`Enter a ${languageDisplayNames[currentLanguage]} word`}
+                ref={inputRef}
+                placeholder={`Add a ${languageDisplayNames[currentLanguage]} word...`}
                 value={newWord}
                 onChange={(e) => setNewWord(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddWord()}
-                className="flex-1"
+                className="w-full pl-4 pr-24 h-12 text-lg rounded-full border-muted bg-background/50 focus-visible:ring-primary"
               />
-              <Button onClick={handleAddWord}>
-                <Plus className="w-4 h-4 mr-2" />
-                Add
-              </Button>
-              <Button variant="outline" onClick={() => setShowBulkInput(true)}>
-                <Upload className="w-4 h-4 mr-2" />
-                Bulk Add
-              </Button>
+              <div className="absolute right-2 top-2 flex space-x-1">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        onClick={() => setShowBulkInput(true)}
+                        className="h-8 rounded-full"
+                      >
+                        <Upload className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <p>Bulk add multiple words</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                
+                <Button 
+                  size="sm" 
+                  onClick={handleAddWord}
+                  disabled={!newWord.trim()}
+                  className="h-8 rounded-full bg-primary hover:bg-primary/90"
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add
+                </Button>
+              </div>
             </div>
           )}
-
-          {error && (
-            <Alert variant="destructive" className="mt-4">
-              <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Search and Filter */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder={`Search ${languageDisplayNames[currentLanguage]} words...`}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8"
-          />
         </div>
         
-        <div className="flex items-center space-x-2">
-          {/* Language Stats */}
-          <div className="text-sm text-muted-foreground mr-2">
-            <span>{currentLanguageGeneratedCount}</span>
-            <span className="mx-1">/</span>
-            <span>{currentLanguageWordCount}</span>
-            <span className="ml-1">words with audio</span>
-          </div>
-          
-          <select 
-            className="p-2 border rounded-md text-sm"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as WordStatus | 'all')}
-          >
-            <option value="all">All Status</option>
-            <option value={WordStatus.COMPLETE}>Complete</option>
-            <option value={WordStatus.GENERATING}>Generating</option>
-            <option value={WordStatus.PENDING}>Pending</option>
-            <option value={WordStatus.ERROR}>Error</option>
-            <option value={WordStatus.IDLE}>Not Generated</option>
-          </select>
-          
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={handleGenerateAllAudio}
-            disabled={isGenerating}
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Generate All
-          </Button>
-          
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={playAllWords}
-          >
-            <Play className="w-4 h-4 mr-2" />
-            Play All
-          </Button>
-        </div>
+        {/* Filters (conditionally shown) */}
+        <AnimatePresence>
+          {showFilters && (
+            <motion.div 
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="flex items-center space-x-4 mt-4 pt-3 border-t border-border/40">
+                <div className="relative flex-1 max-w-xs">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder={`Search...`}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 h-9 rounded-full border-muted"
+                  />
+                </div>
+                
+                <select 
+                  className="h-9 rounded-full border border-muted px-3 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as WordStatus | 'all')}
+                >
+                  <option value="all">All Status</option>
+                  <option value={WordStatus.COMPLETE}>Complete</option>
+                  <option value={WordStatus.GENERATING}>Generating</option>
+                  <option value={WordStatus.PENDING}>Pending</option>
+                  <option value={WordStatus.ERROR}>Error</option>
+                  <option value={WordStatus.IDLE}>Not Generated</option>
+                </select>
+                
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={handleGenerateAllAudio}
+                        disabled={isGenerating}
+                        className="h-9 rounded-full"
+                      >
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Generate All
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <p>Generate audio for all words without audio</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={playAllWords}
+                        className="h-9 rounded-full"
+                      >
+                        <Play className="w-4 h-4 mr-2" />
+                        Play All
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <p>Play all words with audio</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        
+        {/* Error Message */}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="mt-3 px-4 py-2 bg-rose-500/10 text-rose-500 rounded-lg text-sm flex items-center"
+            >
+              <AlertCircle className="h-4 w-4 mr-2 flex-shrink-0" />
+              {error}
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6 ml-auto"
+                onClick={() => setError(null)}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Generation Progress */}
-      {isGenerating && (
-        <Card className="mb-8">
-          <CardHeader className="py-3">
-            <CardTitle className="text-base">Generating Audio</CardTitle>
-            <CardDescription>
-              Processing {generationProgress.processed} of {generationProgress.total} words
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="py-3">
+      <AnimatePresence>
+        {isGenerating && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            className="mb-6 px-5 py-4 bg-muted/30 rounded-xl"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-medium">
+                Generating Audio ({generationProgress.processed}/{generationProgress.total})
+              </div>
+              
+              {generationProgress.estimatedTimeRemaining !== undefined && (
+                <div className="text-xs text-muted-foreground">
+                  {Math.floor(generationProgress.estimatedTimeRemaining / 60)}m {generationProgress.estimatedTimeRemaining % 60}s remaining
+                </div>
+              )}
+            </div>
+            
             <Progress 
               value={(generationProgress.processed / generationProgress.total) * 100} 
-              className="h-2 mb-2"
+              className="h-1.5 mb-2"
             />
-            <div className="flex justify-between text-sm text-muted-foreground">
+            
+            <div className="flex justify-between text-xs text-muted-foreground">
               <span>
                 {generationProgress.successful} successful, {generationProgress.failed} failed
               </span>
-              {generationProgress.estimatedTimeRemaining !== undefined && (
-                <span>
-                  Estimated time remaining: {Math.floor(generationProgress.estimatedTimeRemaining / 60)}m {generationProgress.estimatedTimeRemaining % 60}s
+              
+              {generationProgress.currentWord && (
+                <span className="flex items-center">
+                  <Clock className="h-3 w-3 mr-1 animate-pulse" />
+                  {generationProgress.currentWord}
                 </span>
               )}
             </div>
-            {generationProgress.currentWord && (
-              <p className="mt-2 text-sm">
-                Currently processing: <span className="font-medium">{generationProgress.currentWord}</span>
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Word List */}
       <div className="mb-24" ref={wordListRef}>
         {filteredWords.length === 0 ? (
-          <div className="text-center py-12 bg-muted/20 rounded-lg">
-            <p className="text-muted-foreground mb-2">No {languageDisplayNames[currentLanguage]} words match your criteria</p>
+          <div className="text-center py-16 rounded-xl bg-muted/20">
+            <p className="text-muted-foreground mb-3">No {languageDisplayNames[currentLanguage]} words match your criteria</p>
             {searchQuery && (
               <Button 
                 variant="outline" 
                 size="sm"
                 onClick={() => setSearchQuery('')}
+                className="rounded-full"
               >
                 Clear Search
               </Button>
             )}
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-1.5">
             {filteredWords.map((word) => (
-              <Card 
+              <motion.div 
                 key={word.id} 
                 id={`word-${word.id}`}
-                className={`overflow-hidden transition-all ${currentWordId === word.id ? 'border-primary' : ''}`}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
+                className={cn(
+                  "flex items-center p-3 rounded-xl transition-all",
+                  "hover:bg-muted/50",
+                  currentWordId === word.id ? "bg-muted/80 border-l-4 border-primary pl-2" : "border-l-4 border-transparent"
+                )}
               >
-                <div className="flex items-center p-4">
-                  <div className="flex-1">
-                    <div className="flex items-center">
-                      <h3 className="text-xl font-medium mr-2">{word.word}</h3>
-                      {renderStatusBadge(word.status)}
-                    </div>
+                <div className="flex-1">
+                  <div className="flex items-center">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className={cn(
+                            "w-2.5 h-2.5 rounded-full mr-2.5",
+                            getStatusColor(word.status)
+                          )} />
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          <p>{getStatusTooltip(word.status)}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                     
-                    {word.explanation && (
-                      <Button 
-                        variant="link" 
-                        className="p-0 h-auto text-sm"
-                        onClick={() => viewExplanation(word)}
-                      >
-                        View explanation
-                      </Button>
-                    )}
+                    <h3 className="text-lg font-medium">{word.word}</h3>
                   </div>
                   
-                  <div className="flex items-center space-x-1">
-                    {word.status === WordStatus.COMPLETE ? (
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={() => playAudio(word.id)}
-                        className="flex-nowrap whitespace-nowrap"
-                      >
-                        <Volume2 className="h-4 w-4 mr-2" />
-                        Play
-                      </Button>
-                    ) : (
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        disabled={word.status === WordStatus.GENERATING || word.status === WordStatus.PENDING || isGenerating}
-                        onClick={() => handleGenerateAudio(word.id)}
-                        className="flex-nowrap whitespace-nowrap"
-                      >
-                        <Play className="h-4 w-4 mr-2" />
-                        Generate
-                      </Button>
-                    )}
-                    
+                  {word.explanation && (
+                    <Button 
+                      variant="link" 
+                      className="p-0 h-auto text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => viewExplanation(word)}
+                    >
+                      <Info className="h-3 w-3 mr-1" />
+                      View explanation
+                    </Button>
+                  )}
+                </div>
+                
+                <div className="flex items-center space-x-1">
+                  {word.status === WordStatus.COMPLETE ? (
                     <Button 
                       variant="ghost" 
-                      size="icon"
-                      onClick={() => deleteWord(word.id)}
+                      size="sm"
+                      onClick={() => playAudio(word.id)}
+                      className="rounded-full h-8 w-8 p-0"
                     >
-                      <Trash className="h-4 w-4" />
+                      <Volume2 className="h-4 w-4" />
                     </Button>
-                  </div>
+                  ) : (
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      disabled={word.status === WordStatus.GENERATING || word.status === WordStatus.PENDING || isGenerating}
+                      onClick={() => handleGenerateAudio(word.id)}
+                      className="rounded-full h-8 w-8 p-0"
+                    >
+                      <Play className="h-4 w-4" />
+                    </Button>
+                  )}
+                  
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => deleteWord(word.id)}
+                    className="rounded-full h-8 w-8 p-0 text-muted-foreground hover:text-rose-500"
+                  >
+                    <Trash className="h-4 w-4" />
+                  </Button>
                 </div>
-              </Card>
+              </motion.div>
             ))}
           </div>
         )}
       </div>
 
       {/* Floating Audio Player */}
-      {showPlayer && currentWord && (
-        <div className="fixed bottom-0 left-0 right-0 bg-background border-t shadow-lg p-3 z-10">
-          <div className="container mx-auto flex items-center">
-            <div className="flex-1 flex items-center">
+      <AnimatePresence>
+        {showPlayer && currentWord && (
+          <motion.div 
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            transition={{ type: "spring", damping: 20 }}
+            className="fixed bottom-6 left-1/2 transform -translate-x-1/2 max-w-md w-full bg-background/80 backdrop-blur-md border border-border/50 rounded-full shadow-lg py-2 px-4 z-40"
+          >
+            <div className="flex items-center">
               <Button 
                 variant="ghost" 
                 size="icon"
-                className="mr-2"
+                className="rounded-full h-8 w-8 mr-2 text-muted-foreground hover:text-rose-500"
                 onClick={() => {
                   setShowPlayer(false);
                   setIsPlaying(false);
@@ -717,91 +876,82 @@ export default function SimplifiedVocabularyApp() {
                 <X className="h-4 w-4" />
               </Button>
               
-              <div className="flex-1 mr-4">
-                <div 
-                  className="font-medium text-lg cursor-pointer" 
-                  onClick={() => scrollToWord(currentWord.id)}
-                >
-                  {currentWord.word}
-                </div>
+              <div 
+                className="flex-1 mr-3 cursor-pointer" 
+                onClick={() => scrollToWord(currentWord.id)}
+              >
+                <div className="font-medium truncate">{currentWord.word}</div>
                 <Progress 
                   value={(currentTime / (duration || 1)) * 100} 
                   className="h-1 mt-1"
                 />
-                <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                  <span>{formatTime(currentTime)}</span>
-                  <span>{formatTime(duration)}</span>
-                </div>
+              </div>
+              
+              <div className="flex items-center space-x-1">
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  onClick={playPrevious}
+                  disabled={filteredWords.findIndex(w => w.id === currentWordId) <= 0}
+                  className="rounded-full h-8 w-8 p-0"
+                >
+                  <SkipBack className="h-3.5 w-3.5" />
+                </Button>
+                
+                <Button 
+                  size="icon"
+                  onClick={togglePlay}
+                  className="rounded-full h-8 w-8 p-0 bg-primary hover:bg-primary/90"
+                >
+                  {isPlaying ? (
+                    <Pause className="h-3.5 w-3.5" />
+                  ) : (
+                    <Play className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+                
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  onClick={playNext}
+                  disabled={filteredWords.findIndex(w => w.id === currentWordId) >= filteredWords.length - 1}
+                  className="rounded-full h-8 w-8 p-0"
+                >
+                  <SkipForward className="h-3.5 w-3.5" />
+                </Button>
+                
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  onClick={toggleMute}
+                  className="rounded-full h-8 w-8 p-0"
+                >
+                  {isMuted ? (
+                    <VolumeX className="h-3.5 w-3.5" />
+                  ) : (
+                    <Volume2 className="h-3.5 w-3.5" />
+                  )}
+                </Button>
               </div>
             </div>
-            
-            <div className="flex items-center space-x-2">
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={playPrevious}
-                disabled={filteredWords.findIndex(w => w.id === currentWordId) <= 0}
-              >
-                <SkipBack className="h-4 w-4" />
-              </Button>
-              
-              <Button 
-                size="icon"
-                onClick={togglePlay}
-              >
-                {isPlaying ? (
-                  <Pause className="h-4 w-4" />
-                ) : (
-                  <Play className="h-4 w-4" />
-                )}
-              </Button>
-              
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={playNext}
-                disabled={filteredWords.findIndex(w => w.id === currentWordId) >= filteredWords.length - 1}
-              >
-                <SkipForward className="h-4 w-4" />
-              </Button>
-              
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={toggleMute}
-              >
-                {isMuted ? (
-                  <VolumeX className="h-4 w-4" />
-                ) : (
-                  <Volume2 className="h-4 w-4" />
-                )}
-              </Button>
-              
-              <input 
-                type="range" 
-                min="0" 
-                max="1" 
-                step="0.1"
-                value={volume}
-                onChange={(e) => setVolume(parseFloat(e.target.value))}
-                className="w-20"
-              />
-            </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       {/* Explanation Dialog */}
       {currentExplanationWord && (
         <Dialog open={showExplanation} onOpenChange={setShowExplanation}>
-          <DialogContent>
+          <DialogContent className="max-w-md rounded-xl">
             <DialogHeader>
-              <DialogTitle>{currentExplanationWord.word}</DialogTitle>
+              <DialogTitle className="text-xl flex items-center">
+                <span className="mr-2">{currentExplanationWord.word}</span>
+                <Sparkles className="h-4 w-4 text-primary" />
+              </DialogTitle>
               <DialogDescription>
                 Explanation and example sentences
               </DialogDescription>
             </DialogHeader>
-            <div className="whitespace-pre-wrap">
+            <div className="whitespace-pre-wrap text-sm">
               {currentExplanationWord.explanation || 'No explanation available'}
             </div>
           </DialogContent>
