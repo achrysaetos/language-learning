@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useWords } from '@/hooks/useWords';
 import { Word, WordStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { AlertCircle, CheckCircle, Clock, Play, Plus, Trash, Upload, Volume2, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle, Clock, FolderPlus, ListPlus, Play, Plus, PlusCircle, Save, Trash, Upload, Volume2, XCircle } from 'lucide-react';
 
 /**
  * WordManager component for adding, viewing, and generating audio for Chinese words
@@ -18,12 +18,19 @@ export default function WordManager() {
   // Get word management functions from custom hook
   const {
     words,
+    wordsMap,
     addWord,
     deleteWord,
     generateAudio,
     generateAudioBatch,
     isGenerating,
     generationProgress,
+    playlists,
+    createPlaylist,
+    updatePlaylist,
+    deletePlaylist,
+    addWordToPlaylist,
+    removeWordFromPlaylist,
   } = useWords();
 
   // Local state for form inputs
@@ -33,6 +40,13 @@ export default function WordManager() {
   const [error, setError] = useState<string | null>(null);
   const [selectedWords, setSelectedWords] = useState<Set<string>>(new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Playlist management state
+  const [showCreatePlaylistDialog, setShowCreatePlaylistDialog] = useState(false);
+  const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [newPlaylistDescription, setNewPlaylistDescription] = useState('');
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
+  const [showAddToPlaylistDialog, setShowAddToPlaylistDialog] = useState(false);
 
   // Handle adding a single word
   const handleAddWord = useCallback(() => {
@@ -139,6 +153,74 @@ export default function WordManager() {
     }
   }, []);
 
+  // Create a new playlist
+  const handleCreatePlaylist = useCallback(() => {
+    if (!newPlaylistName.trim()) {
+      setError('Please enter a playlist name');
+      return;
+    }
+
+    try {
+      const playlistId = createPlaylist(newPlaylistName.trim(), newPlaylistDescription.trim() || undefined);
+      setNewPlaylistName('');
+      setNewPlaylistDescription('');
+      setShowCreatePlaylistDialog(false);
+      setSelectedPlaylistId(playlistId);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create playlist');
+    }
+  }, [newPlaylistName, newPlaylistDescription, createPlaylist]);
+
+  // Add selected words to a playlist
+  const handleAddToPlaylist = useCallback(() => {
+    if (selectedWords.size === 0) {
+      setError('Please select at least one word');
+      return;
+    }
+
+    if (!selectedPlaylistId) {
+      setError('Please select a playlist');
+      return;
+    }
+
+    try {
+      Array.from(selectedWords).forEach(wordId => {
+        addWordToPlaylist(selectedPlaylistId, wordId);
+      });
+      setShowAddToPlaylistDialog(false);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add words to playlist');
+    }
+  }, [selectedWords, selectedPlaylistId, addWordToPlaylist]);
+
+  // Create a default playlist and add selected words
+  const handleAddToDefaultPlaylist = useCallback(() => {
+    if (selectedWords.size === 0) {
+      setError('Please select at least one word');
+      return;
+    }
+
+    try {
+      // Find default playlist or create one
+      let defaultPlaylistId = playlists.find(p => p.name === 'Default Playlist')?.id;
+      
+      if (!defaultPlaylistId) {
+        defaultPlaylistId = createPlaylist('Default Playlist', 'Automatically created default playlist');
+      }
+
+      // Add selected words to default playlist
+      Array.from(selectedWords).forEach(wordId => {
+        addWordToPlaylist(defaultPlaylistId!, wordId);
+      });
+
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add words to default playlist');
+    }
+  }, [selectedWords, playlists, createPlaylist, addWordToPlaylist]);
+
   // Render status badge for a word
   const renderStatusBadge = (status: WordStatus) => {
     switch (status) {
@@ -217,6 +299,171 @@ export default function WordManager() {
         </CardContent>
       </Card>
 
+      {/* Playlist Management */}
+      <Card className="mb-8">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Playlist Management</CardTitle>
+            <CardDescription>
+              Create playlists and add words to them
+            </CardDescription>
+          </div>
+          <Dialog open={showCreatePlaylistDialog} onOpenChange={setShowCreatePlaylistDialog}>
+            <DialogTrigger asChild>
+              <Button size="sm">
+                <FolderPlus className="w-4 h-4 mr-2" />
+                Create Playlist
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create New Playlist</DialogTitle>
+                <DialogDescription>
+                  Enter a name and optional description for your playlist
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <label htmlFor="playlist-name" className="text-sm font-medium">
+                    Playlist Name
+                  </label>
+                  <Input
+                    id="playlist-name"
+                    placeholder="My Chinese Playlist"
+                    value={newPlaylistName}
+                    onChange={(e) => setNewPlaylistName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="playlist-description" className="text-sm font-medium">
+                    Description (Optional)
+                  </label>
+                  <Textarea
+                    id="playlist-description"
+                    placeholder="A collection of Chinese words I'm learning"
+                    value={newPlaylistDescription}
+                    onChange={(e) => setNewPlaylistDescription(e.target.value)}
+                    rows={3}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowCreatePlaylistDialog(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleCreatePlaylist}>
+                  Create Playlist
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {selectedWords.size > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={handleAddToDefaultPlaylist}
+                >
+                  <ListPlus className="w-4 h-4 mr-2" />
+                  Add to Default Playlist
+                </Button>
+                
+                <Dialog open={showAddToPlaylistDialog} onOpenChange={setShowAddToPlaylistDialog}>
+                  <DialogTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                    >
+                      <PlusCircle className="w-4 h-4 mr-2" />
+                      Add to Playlist
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add to Playlist</DialogTitle>
+                      <DialogDescription>
+                        Select a playlist to add {selectedWords.size} selected word(s)
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                      <select 
+                        className="w-full p-2 border rounded-md"
+                        value={selectedPlaylistId || ''}
+                        onChange={(e) => setSelectedPlaylistId(e.target.value)}
+                      >
+                        <option value="" disabled>Select a playlist</option>
+                        {playlists.map(playlist => (
+                          <option key={playlist.id} value={playlist.id}>
+                            {playlist.name} ({playlist.words.length} words)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setShowAddToPlaylistDialog(false)}>
+                        Cancel
+                      </Button>
+                      <Button onClick={handleAddToPlaylist}>
+                        Add to Playlist
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            ) : (
+              <p className="text-muted-foreground">
+                Select words from the list below to add them to playlists
+              </p>
+            )}
+
+            {playlists.length > 0 ? (
+              <div className="mt-4">
+                <h3 className="text-sm font-medium mb-2">Your Playlists</h3>
+                <div className="space-y-2">
+                  {playlists.map(playlist => (
+                    <div 
+                      key={playlist.id} 
+                      className="flex items-center justify-between p-3 rounded-md bg-muted/50"
+                    >
+                      <div>
+                        <h4 className="font-medium">{playlist.name}</h4>
+                        <p className="text-sm text-muted-foreground">
+                          {playlist.words.length} words
+                        </p>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => {
+                            setSelectedPlaylistId(playlist.id);
+                            setShowAddToPlaylistDialog(true);
+                          }}
+                        >
+                          <Plus className="w-4 h-4 mr-1" />
+                          Add Words
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <Alert className="bg-blue-50 dark:bg-blue-900/20">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>No Playlists Yet</AlertTitle>
+                <AlertDescription>
+                  Create your first playlist to organize your vocabulary words
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Generation Progress */}
       {isGenerating && (
         <Card className="mb-8">
@@ -275,6 +522,16 @@ export default function WordManager() {
               <Play className="w-4 h-4 mr-2" />
               Generate Selected ({selectedWords.size})
             </Button>
+            {selectedWords.size > 0 && (
+              <Button 
+                variant="outline"
+                size="sm" 
+                onClick={() => setShowAddToPlaylistDialog(true)}
+              >
+                <Save className="w-4 h-4 mr-2" />
+                Add to Playlist ({selectedWords.size})
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -364,7 +621,7 @@ export default function WordManager() {
         </CardContent>
         <CardFooter>
           <p className="text-sm text-muted-foreground">
-            Click on a word to select it for batch processing
+            Click on a word to select it for batch processing or adding to playlists
           </p>
         </CardFooter>
       </Card>

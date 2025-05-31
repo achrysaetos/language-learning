@@ -14,9 +14,12 @@ import {
   Repeat, 
   Volume2, 
   VolumeX,
-  Info
+  Info,
+  Bug,
+  AlertCircle
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 /**
  * AudioPlayer component for playing playlists of Chinese words
@@ -30,6 +33,7 @@ export default function AudioPlayer() {
     createPlaylist,
     addWordToPlaylist,
     removeWordFromPlaylist,
+    generatedWordCount,
   } = useWords();
 
   // Audio player state
@@ -43,6 +47,7 @@ export default function AudioPlayer() {
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [showExplanation, setShowExplanation] = useState(false);
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
   
   // References
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -61,6 +66,21 @@ export default function AudioPlayer() {
   const currentWord = currentWordIndex >= 0 && currentWordIndex < playlistWords.length 
     ? playlistWords[currentWordIndex] 
     : null;
+
+  // Debug info - log completed words
+  const completeWords = allWords.filter(word => word.status === WordStatus.COMPLETE);
+  
+  // Add console logs for debugging
+  useEffect(() => {
+    console.log('AudioPlayer - All Words:', allWords);
+    console.log('AudioPlayer - Complete Words:', completeWords);
+    console.log('AudioPlayer - Complete Words Count:', completeWords.length);
+    console.log('AudioPlayer - generatedWordCount:', generatedWordCount);
+    console.log('AudioPlayer - Playlists:', playlists);
+    console.log('AudioPlayer - Current Playlist:', currentPlaylist);
+    console.log('AudioPlayer - Playlist Words:', playlistWords);
+    console.log('AudioPlayer - WordsMap:', wordsMap);
+  }, [allWords, completeWords, playlists, currentPlaylist, playlistWords, wordsMap, generatedWordCount]);
 
   // Handle audio ended event - properly memoized with all dependencies
   const handleAudioEnded = useCallback(() => {
@@ -109,6 +129,7 @@ export default function AudioPlayer() {
   // Update audio source when current word changes
   useEffect(() => {
     if (currentWord && currentWord.audioPath && audioRef.current) {
+      console.log('Setting audio source:', currentWord.audioPath);
       audioRef.current.src = currentWord.audioPath;
       
       if (isPlaying) {
@@ -228,6 +249,7 @@ export default function AudioPlayer() {
 
     // Get complete words
     const completeWords = allWords.filter(word => word.status === WordStatus.COMPLETE);
+    console.log('Creating default playlist with complete words:', completeWords);
     
     if (completeWords.length > 0) {
       // Create a default playlist with all complete words
@@ -238,6 +260,7 @@ export default function AudioPlayer() {
       
       // Add words to playlist
       completeWords.forEach(word => {
+        console.log('Adding word to default playlist:', word);
         addWordToPlaylist(playlistId, word.id);
       });
       
@@ -253,16 +276,78 @@ export default function AudioPlayer() {
     }
   }, [playlists, currentPlaylistId]);
 
+  // Toggle debug info display
+  const toggleDebugInfo = useCallback(() => {
+    setShowDebugInfo(prev => !prev);
+  }, []);
+
   return (
     <div className="container mx-auto py-8">
       <Card className="mb-8">
-        <CardHeader>
-          <CardTitle>Audio Player</CardTitle>
-          <CardDescription>
-            Listen to your vocabulary words
-          </CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Audio Player</CardTitle>
+            <CardDescription>
+              Listen to your vocabulary words
+            </CardDescription>
+          </div>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={toggleDebugInfo}
+          >
+            <Bug className="w-4 h-4 mr-2" />
+            {showDebugInfo ? 'Hide Debug' : 'Show Debug'}
+          </Button>
         </CardHeader>
         <CardContent>
+          {/* Debug Information */}
+          {showDebugInfo && (
+            <Alert className="mb-6 bg-yellow-50 dark:bg-yellow-900/20">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Debug Information</AlertTitle>
+              <AlertDescription>
+                <div className="space-y-2 mt-2 text-xs font-mono overflow-auto max-h-60 p-2 bg-black/5 rounded">
+                  <div><strong>Total Words:</strong> {allWords.length}</div>
+                  <div><strong>Complete Words:</strong> {completeWords.length}</div>
+                  <div><strong>Generated Word Count:</strong> {generatedWordCount}</div>
+                  <div><strong>Playlists Count:</strong> {playlists.length}</div>
+                  <div><strong>Current Playlist ID:</strong> {currentPlaylistId || 'none'}</div>
+                  <div><strong>Playlist Words Count:</strong> {playlistWords.length}</div>
+                  <div><strong>Default Playlist Created:</strong> {defaultPlaylistCreatedRef.current ? 'Yes' : 'No'}</div>
+                  
+                  <div className="mt-4"><strong>Complete Words:</strong></div>
+                  <pre className="text-xs overflow-auto">
+                    {JSON.stringify(completeWords, null, 2)}
+                  </pre>
+                  
+                  <div className="mt-4"><strong>Current Playlist:</strong></div>
+                  <pre className="text-xs overflow-auto">
+                    {JSON.stringify(currentPlaylist, null, 2)}
+                  </pre>
+                  
+                  <div className="mt-4"><strong>Word Status Counts:</strong></div>
+                  <div>IDLE: {allWords.filter(w => w.status === WordStatus.IDLE).length}</div>
+                  <div>PENDING: {allWords.filter(w => w.status === WordStatus.PENDING).length}</div>
+                  <div>GENERATING: {allWords.filter(w => w.status === WordStatus.GENERATING).length}</div>
+                  <div>COMPLETE: {allWords.filter(w => w.status === WordStatus.COMPLETE).length}</div>
+                  <div>ERROR: {allWords.filter(w => w.status === WordStatus.ERROR).length}</div>
+                  
+                  <div className="mt-4"><strong>Audio Files Check:</strong></div>
+                  {completeWords.map(word => (
+                    <div key={word.id} className="flex items-center gap-2">
+                      <span>{word.word}</span>
+                      <span>Path: {word.audioPath || 'none'}</span>
+                      <span className={word.audioPath ? 'text-green-500' : 'text-red-500'}>
+                        {word.audioPath ? '✓' : '✗'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+          
           {/* Playlist Selector */}
           <div className="mb-6">
             <label className="block text-sm font-medium mb-2">Select Playlist</label>
@@ -301,7 +386,9 @@ export default function AudioPlayer() {
               <p className="text-muted-foreground">
                 {playlistWords.length > 0 
                   ? 'Select a word to play' 
-                  : 'No words available in this playlist'}
+                  : completeWords.length > 0 
+                    ? 'No words available in this playlist' 
+                    : 'No completed words available. Generate audio for words first.'}
               </p>
             )}
           </div>
@@ -405,9 +492,23 @@ export default function AudioPlayer() {
           <div>
             <h3 className="text-lg font-medium mb-2">Playlist Words</h3>
             {playlistWords.length === 0 ? (
-              <p className="text-muted-foreground text-center py-4">
-                No words available in this playlist
-              </p>
+              <Alert className="bg-blue-50 dark:bg-blue-900/20">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>No Words in Playlist</AlertTitle>
+                <AlertDescription>
+                  {completeWords.length > 0 ? (
+                    <>
+                      You have {completeWords.length} completed words, but none are in this playlist.
+                      {showDebugInfo ? '' : ' Enable debug mode for more details.'}
+                    </>
+                  ) : (
+                    <>
+                      No words with completed audio generation found. 
+                      Go to the "Manage Words" tab and generate audio for some words first.
+                    </>
+                  )}
+                </AlertDescription>
+              </Alert>
             ) : (
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {playlistWords.map((word, index) => (
