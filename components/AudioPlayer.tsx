@@ -47,6 +47,7 @@ export default function AudioPlayer() {
   // References
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const defaultPlaylistCreatedRef = useRef(false);
 
   // Get current playlist and words
   const currentPlaylist = currentPlaylistId ? playlists.find(p => p.id === currentPlaylistId) : null;
@@ -61,32 +62,49 @@ export default function AudioPlayer() {
     ? playlistWords[currentWordIndex] 
     : null;
 
+  // Handle audio ended event - properly memoized with all dependencies
+  const handleAudioEnded = useCallback(() => {
+    if (currentWordIndex < playlistWords.length - 1) {
+      // Move to next word
+      setCurrentWordIndex(prev => prev + 1);
+    } else if (loop) {
+      // Loop back to first word
+      setCurrentWordIndex(0);
+    } else {
+      // End of playlist
+      setIsPlaying(false);
+      setCurrentTime(0);
+    }
+  }, [currentWordIndex, playlistWords.length, loop]);
+
   // Initialize audio element when component mounts
   useEffect(() => {
+    // Create audio element if it doesn't exist
     if (!audioRef.current) {
       audioRef.current = new Audio();
-      
-      // Set up audio event listeners
-      audioRef.current.addEventListener('ended', handleAudioEnded);
-      audioRef.current.addEventListener('loadedmetadata', () => {
-        if (audioRef.current) {
-          setDuration(audioRef.current.duration);
-        }
-      });
-      
-      // Clean up event listeners on unmount
-      return () => {
-        if (audioRef.current) {
-          audioRef.current.removeEventListener('ended', handleAudioEnded);
-          audioRef.current.pause();
-        }
-        
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current);
-        }
-      };
     }
-  }, []);
+    
+    // Set up audio event listeners
+    const audio = audioRef.current;
+    audio.addEventListener('ended', handleAudioEnded);
+    audio.addEventListener('loadedmetadata', () => {
+      if (audio) {
+        setDuration(audio.duration);
+      }
+    });
+    
+    // Clean up event listeners on unmount
+    return () => {
+      if (audio) {
+        audio.removeEventListener('ended', handleAudioEnded);
+        audio.pause();
+      }
+      
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+    };
+  }, [handleAudioEnded]); // Only depend on handleAudioEnded which is properly memoized
   
   // Update audio source when current word changes
   useEffect(() => {
@@ -127,21 +145,6 @@ export default function AudioPlayer() {
       }
     };
   }, [isPlaying]);
-  
-  // Handle audio ended event
-  const handleAudioEnded = useCallback(() => {
-    if (currentWordIndex < playlistWords.length - 1) {
-      // Move to next word
-      setCurrentWordIndex(prev => prev + 1);
-    } else if (loop) {
-      // Loop back to first word
-      setCurrentWordIndex(0);
-    } else {
-      // End of playlist
-      setIsPlaying(false);
-      setCurrentTime(0);
-    }
-  }, [currentWordIndex, playlistWords.length, loop]);
   
   // Play/pause toggle
   const togglePlay = useCallback(() => {
@@ -196,11 +199,11 @@ export default function AudioPlayer() {
   }, []);
   
   // Format time (seconds) to mm:ss
-  const formatTime = (seconds: number) => {
+  const formatTime = useCallback((seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  }, []);
   
   // Play a specific word from the playlist
   const playWordAt = useCallback((index: number) => {
@@ -216,26 +219,39 @@ export default function AudioPlayer() {
     setCurrentTime(0);
   }, []);
   
-  // Create a default playlist if none exists
+  // Create a default playlist if none exists (only runs once)
   useEffect(() => {
-    if (playlists.length === 0) {
+    // Skip if we've already created a default playlist or if there are playlists
+    if (defaultPlaylistCreatedRef.current || playlists.length > 0) {
+      return;
+    }
+
+    // Get complete words
+    const completeWords = allWords.filter(word => word.status === WordStatus.COMPLETE);
+    
+    if (completeWords.length > 0) {
       // Create a default playlist with all complete words
-      const completeWordIds = allWords
-        .filter(word => word.status === WordStatus.COMPLETE)
-        .map(word => word.id);
+      const playlistId = createPlaylist('My Playlist');
       
-      if (completeWordIds.length > 0) {
-        const playlistId = createPlaylist('My Playlist');
-        completeWordIds.forEach(wordId => {
-          addWordToPlaylist(playlistId, wordId);
-        });
-        setCurrentPlaylistId(playlistId);
-      }
-    } else if (!currentPlaylistId) {
-      // Set first playlist as current if none selected
+      // Mark as created to prevent infinite loop
+      defaultPlaylistCreatedRef.current = true;
+      
+      // Add words to playlist
+      completeWords.forEach(word => {
+        addWordToPlaylist(playlistId, word.id);
+      });
+      
+      // Set as current playlist
+      setCurrentPlaylistId(playlistId);
+    }
+  }, [allWords, createPlaylist, addWordToPlaylist, playlists.length]);
+  
+  // Set first playlist as current if none selected
+  useEffect(() => {
+    if (playlists.length > 0 && !currentPlaylistId) {
       setCurrentPlaylistId(playlists[0].id);
     }
-  }, [playlists, allWords, createPlaylist, addWordToPlaylist, currentPlaylistId]);
+  }, [playlists, currentPlaylistId]);
 
   return (
     <div className="container mx-auto py-8">
@@ -358,14 +374,14 @@ export default function AudioPlayer() {
           {/* Playback Settings */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center space-x-2">
-              <Switch 
-                id="auto-play" 
-                checked={autoPlay}
-                onCheckedChange={toggleAutoPlay}
-              />
               <label htmlFor="auto-play" className="text-sm">
                 Auto-play next word
               </label>
+              <Switch 
+                id="auto-play" 
+                checked={autoPlay}
+                onCheckedChange={setAutoPlay}
+              />
             </div>
             
             <div className="flex items-center space-x-2">

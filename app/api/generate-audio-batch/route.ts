@@ -17,12 +17,13 @@ interface WordProcessingResult {
 }
 
 interface ProgressUpdate {
-  type: 'progress' | 'result' | 'complete';
+  type: 'progress' | 'result' | 'complete' | 'error';
   processed: number;
   total: number;
   currentWord?: string;
   result?: WordProcessingResult;
   allResults?: WordProcessingResult[];
+  error?: string;
 }
 
 // Ensure audio directory exists
@@ -34,6 +35,33 @@ async function ensureDirectoryExists(dirPath: string) {
   }
 }
 
+// Helper function to safely write to the stream
+async function safeWrite(
+  writer: WritableStreamDefaultWriter<Uint8Array>,
+  encoder: TextEncoder,
+  data: any
+): Promise<boolean> {
+  try {
+    await writer.write(encoder.encode(JSON.stringify(data) + '\n'));
+    return true;
+  } catch (error) {
+    console.error('Error writing to stream:', error);
+    return false;
+  }
+}
+
+// Helper function to safely close the writer
+async function safeClose(writer: WritableStreamDefaultWriter<Uint8Array>): Promise<void> {
+  try {
+    // Check if the writer is still writable (not closed)
+    // We can't directly check if it's closed, but we can use a try/catch
+    await writer.close();
+  } catch (error) {
+    // Writer might already be closed, which is fine
+    console.log('Writer may already be closed:', error instanceof Error ? error.message : error);
+  }
+}
+
 export async function POST(request: NextRequest) {
   // Create a streaming response
   const encoder = new TextEncoder();
@@ -41,13 +69,14 @@ export async function POST(request: NextRequest) {
   const writer = stream.writable.getWriter();
 
   // Process the request in the background
-  processBatchRequest(request, writer).catch((error) => {
+  processBatchRequest(request, writer, encoder).catch((error) => {
     console.error('Unhandled error in batch processing:', error);
-    writer.write(encoder.encode(JSON.stringify({
+    safeWrite(writer, encoder, {
       type: 'error',
       error: 'Internal server error occurred'
-    })));
-    writer.close();
+    }).finally(() => {
+      safeClose(writer);
+    });
   });
 
   // Return the stream as the response
@@ -61,8 +90,12 @@ export async function POST(request: NextRequest) {
   });
 }
 
-async function processBatchRequest(request: NextRequest, writer: WritableStreamDefaultWriter<Uint8Array>) {
-  const encoder = new TextEncoder();
+async function processBatchRequest(
+  request: NextRequest, 
+  writer: WritableStreamDefaultWriter<Uint8Array>,
+  encoder: TextEncoder
+) {
+  let writerClosed = false;
   
   try {
     // Parse request body
@@ -71,21 +104,21 @@ async function processBatchRequest(request: NextRequest, writer: WritableStreamD
 
     // Validate input
     if (!Array.isArray(words) || words.length === 0) {
-      writer.write(encoder.encode(JSON.stringify({
+      await safeWrite(writer, encoder, {
         type: 'error',
         error: 'Words array is required and must not be empty'
-      })));
-      return writer.close();
+      });
+      return; // Don't close the writer here, let the finally block handle it
     }
 
     // Initialize OpenAI client
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      writer.write(encoder.encode(JSON.stringify({
+      await safeWrite(writer, encoder, {
         type: 'error',
         error: 'OpenAI API key is not configured'
-      })));
-      return writer.close();
+      });
+      return; // Don't close the writer here, let the finally block handle it
     }
 
     const client = new OpenAI({ apiKey });
@@ -100,12 +133,12 @@ async function processBatchRequest(request: NextRequest, writer: WritableStreamD
       const word = words[i];
       
       // Send progress update
-      writer.write(encoder.encode(JSON.stringify({
+      await safeWrite(writer, encoder, {
         type: 'progress',
         processed: i,
         total: words.length,
         currentWord: word
-      } as ProgressUpdate) + '\n'));
+      } as ProgressUpdate);
 
       try {
         // Define prompts (same as single word endpoint)
@@ -153,12 +186,12 @@ async function processBatchRequest(request: NextRequest, writer: WritableStreamD
         results.push(result);
 
         // Send individual result
-        writer.write(encoder.encode(JSON.stringify({
+        await safeWrite(writer, encoder, {
           type: 'result',
           processed: i + 1,
           total: words.length,
           result
-        } as ProgressUpdate) + '\n'));
+        } as ProgressUpdate);
 
       } catch (error) {
         console.error(`Error processing word "${word}":`, error);
@@ -172,30 +205,34 @@ async function processBatchRequest(request: NextRequest, writer: WritableStreamD
         results.push(result);
 
         // Send individual failure result
-        writer.write(encoder.encode(JSON.stringify({
+        await safeWrite(writer, encoder, {
           type: 'result',
           processed: i + 1,
           total: words.length,
           result
-        } as ProgressUpdate) + '\n'));
+        } as ProgressUpdate);
       }
     }
 
     // Send complete update with all results
-    writer.write(encoder.encode(JSON.stringify({
+    await safeWrite(writer, encoder, {
       type: 'complete',
       processed: words.length,
       total: words.length,
       allResults: results
-    } as ProgressUpdate) + '\n'));
+    } as ProgressUpdate);
 
   } catch (error) {
     console.error('Error in batch processing:', error);
-    writer.write(encoder.encode(JSON.stringify({
+    await safeWrite(writer, encoder, {
       type: 'error',
       error: error instanceof Error ? error.message : 'Unknown error occurred'
-    }) + '\n'));
+    });
   } finally {
-    writer.close();
+    // Only close the writer once in the finally block
+    if (!writerClosed) {
+      writerClosed = true;
+      await safeClose(writer);
+    }
   }
 }
