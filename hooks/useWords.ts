@@ -7,9 +7,13 @@ import {
   GenerationProgress, 
   StorageKeys,
   WordProcessingResult,
-  ProgressUpdate
+  ProgressUpdate,
+  Language,
+  LanguageConfig,
+  UserSettings
 } from '@/lib/types';
 import { useLocalStorage } from './useLocalStorage';
+import { getLanguageConfig } from '@/lib/languageConfigs';
 
 /**
  * Custom hook for managing words, playlists, and audio generation
@@ -19,6 +23,16 @@ export function useWords() {
   // Persist words and playlists in localStorage
   const [words, setWords] = useLocalStorage<Record<string, Word>>(StorageKeys.WORDS, {});
   const [playlists, setPlaylists] = useLocalStorage<Record<string, Playlist>>(StorageKeys.PLAYLISTS, {});
+  
+  // User settings with language preference
+  const [settings, setSettings] = useLocalStorage<UserSettings>(StorageKeys.SETTINGS, {
+    defaultVoice: 'echo',
+    currentLanguage: Language.CHINESE, // Default to Chinese for backward compatibility
+    autoPlay: false,
+    darkMode: false,
+    repeatCount: 1,
+    pauseDuration: 1
+  });
   
   // Track generation progress
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress>({
@@ -31,9 +45,45 @@ export function useWords() {
   // Track if a generation is in progress
   const [isGenerating, setIsGenerating] = useState(false);
   
+  // Get current language configuration
+  const getCurrentLanguageConfig = useCallback(() => {
+    return getLanguageConfig(settings.currentLanguage);
+  }, [settings.currentLanguage]);
+  
+  // Set current language
+  const setCurrentLanguage = useCallback((language: Language) => {
+    setSettings(prev => ({
+      ...prev,
+      currentLanguage: language
+    }));
+  }, [setSettings]);
+  
+  // Migrate existing words without languageCode to use Chinese
+  useEffect(() => {
+    const needsMigration = Object.values(words).some(word => !('languageCode' in word));
+    
+    if (needsMigration) {
+      setWords(prev => {
+        const updated = { ...prev };
+        
+        for (const id in updated) {
+          if (!('languageCode' in updated[id])) {
+            updated[id] = {
+              ...updated[id],
+              languageCode: Language.CHINESE
+            };
+          }
+        }
+        
+        return updated;
+      });
+    }
+  }, [words, setWords]);
+  
   // Word CRUD operations
-  const addWord = useCallback((word: string, pinyin?: string) => {
+  const addWord = useCallback((word: string, languageCode?: Language, pinyin?: string) => {
     const id = word; // Use the word itself as the ID for simplicity
+    const language = languageCode || settings.currentLanguage;
     
     setWords(prev => {
       // Skip if word already exists
@@ -44,6 +94,7 @@ export function useWords() {
         [id]: {
           id,
           word,
+          languageCode: language,
           pinyin,
           status: WordStatus.IDLE,
           createdAt: new Date(),
@@ -53,7 +104,7 @@ export function useWords() {
     });
     
     return id;
-  }, [setWords]);
+  }, [setWords, settings.currentLanguage]);
   
   const updateWord = useCallback((id: string, updates: Partial<Omit<Word, 'id'>>) => {
     setWords(prev => {
@@ -99,8 +150,18 @@ export function useWords() {
     return Object.values(words);
   }, [words]);
   
+  // Get words by language
+  const getWordsByLanguage = useCallback((languageCode: Language) => {
+    return Object.values(words).filter(word => word.languageCode === languageCode);
+  }, [words]);
+  
+  // Get words for current language
+  const getCurrentLanguageWords = useCallback(() => {
+    return getWordsByLanguage(settings.currentLanguage);
+  }, [getWordsByLanguage, settings.currentLanguage]);
+  
   // Playlist CRUD operations
-  const createPlaylist = useCallback((name: string, description?: string) => {
+  const createPlaylist = useCallback((name: string, description?: string, languageCode?: Language) => {
     const id = uuidv4();
     
     setPlaylists(prev => ({
@@ -109,6 +170,7 @@ export function useWords() {
         id,
         name,
         description,
+        languageCode: languageCode || settings.currentLanguage,
         words: [],
         createdAt: new Date(),
         playCount: 0
@@ -116,7 +178,7 @@ export function useWords() {
     }));
     
     return id;
-  }, [setPlaylists]);
+  }, [setPlaylists, settings.currentLanguage]);
   
   const updatePlaylist = useCallback((id: string, updates: Partial<Omit<Playlist, 'id'>>) => {
     setPlaylists(prev => {
@@ -147,6 +209,18 @@ export function useWords() {
   const getAllPlaylists = useCallback(() => {
     return Object.values(playlists);
   }, [playlists]);
+  
+  // Get playlists by language
+  const getPlaylistsByLanguage = useCallback((languageCode: Language) => {
+    return Object.values(playlists).filter(playlist => 
+      !playlist.languageCode || playlist.languageCode === languageCode
+    );
+  }, [playlists]);
+  
+  // Get playlists for current language
+  const getCurrentLanguagePlaylists = useCallback(() => {
+    return getPlaylistsByLanguage(settings.currentLanguage);
+  }, [getPlaylistsByLanguage, settings.currentLanguage]);
   
   const addWordToPlaylist = useCallback((playlistId: string, wordId: string) => {
     setPlaylists(prev => {
@@ -188,11 +262,14 @@ export function useWords() {
       // Update status to generating
       updateWord(wordId, { status: WordStatus.GENERATING });
       
-      // Call API to generate audio
+      // Call API to generate audio with language parameter
       const response = await fetch('/api/generate-audio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word: word.word })
+        body: JSON.stringify({ 
+          word: word.word,
+          language: word.languageCode || settings.currentLanguage
+        })
       });
       
       if (!response.ok) {
@@ -220,7 +297,7 @@ export function useWords() {
       
       throw error;
     }
-  }, [words, updateWord]);
+  }, [words, updateWord, settings.currentLanguage]);
   
   const generateAudioBatch = useCallback(async (wordIds: string[]) => {
     if (isGenerating) {
@@ -237,8 +314,19 @@ export function useWords() {
       throw new Error('No valid words selected for generation');
     }
     
-    // Get the actual words from the IDs
-    const wordsToGenerate = validWordIds.map(id => words[id].word);
+    // Get the actual words from the IDs and group by language
+    const wordsByLanguage: Record<Language, { id: string, word: string }[]> = {};
+    
+    validWordIds.forEach(id => {
+      const word = words[id];
+      const language = word.languageCode || settings.currentLanguage;
+      
+      if (!wordsByLanguage[language]) {
+        wordsByLanguage[language] = [];
+      }
+      
+      wordsByLanguage[language].push({ id, word: word.word });
+    });
     
     try {
       setIsGenerating(true);
@@ -257,112 +345,141 @@ export function useWords() {
         updateWord(id, { status: WordStatus.PENDING });
       });
       
-      // Call batch API with streaming response
-      const response = await fetch('/api/generate-audio-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ words: wordsToGenerate })
-      });
+      // Process each language group separately
+      let processedCount = 0;
+      let successfulCount = 0;
+      let failedCount = 0;
       
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status} ${response.statusText}`);
-      }
-      
-      // Process the streaming response
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('Response body is not readable');
-      }
-      
-      // Read chunks of data as they arrive
-      const decoder = new TextDecoder();
-      let buffer = '';
-      
-      while (true) {
-        const { done, value } = await reader.read();
+      for (const language in wordsByLanguage) {
+        const wordsInLanguage = wordsByLanguage[language as Language];
+        const wordTexts = wordsInLanguage.map(w => w.word);
+        const languageCode = language as Language;
         
-        if (done) {
-          break;
+        // Call batch API with streaming response for this language group
+        const response = await fetch('/api/generate-audio-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            words: wordTexts,
+            language: languageCode
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status} ${response.statusText}`);
         }
         
-        // Decode the chunk and add to buffer
-        buffer += decoder.decode(value, { stream: true });
+        // Process the streaming response
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error('Response body is not readable');
+        }
         
-        // Process complete JSON objects from the buffer
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep the last incomplete line in the buffer
+        // Read chunks of data as they arrive
+        const decoder = new TextDecoder();
+        let buffer = '';
         
-        for (const line of lines) {
-          if (!line.trim()) continue;
+        // Map of word text to word ID for this language group
+        const wordIdMap: Record<string, string> = {};
+        wordsInLanguage.forEach(w => {
+          wordIdMap[w.word] = w.id;
+        });
+        
+        while (true) {
+          const { done, value } = await reader.read();
           
-          try {
-            const update = JSON.parse(line) as ProgressUpdate;
+          if (done) {
+            break;
+          }
+          
+          // Decode the chunk and add to buffer
+          buffer += decoder.decode(value, { stream: true });
+          
+          // Process complete JSON objects from the buffer
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep the last incomplete line in the buffer
+          
+          for (const line of lines) {
+            if (!line.trim()) continue;
             
-            if (update.type === 'progress') {
-              // Update the current word being processed
-              setGenerationProgress(prev => ({
-                ...prev,
-                processed: update.processed,
-                currentWord: update.currentWord
-              }));
+            try {
+              const update = JSON.parse(line) as ProgressUpdate;
               
-              // Update the word status to generating
-              if (update.currentWord) {
-                const wordId = validWordIds[update.processed];
+              if (update.type === 'progress') {
+                // Calculate overall progress
+                const overallProcessed = processedCount + update.processed;
+                
+                // Update the current word being processed
+                setGenerationProgress(prev => ({
+                  ...prev,
+                  processed: overallProcessed,
+                  currentWord: update.currentWord
+                }));
+                
+                // Update the word status to generating
+                if (update.currentWord) {
+                  const wordId = wordIdMap[update.currentWord];
+                  if (wordId) {
+                    updateWord(wordId, { status: WordStatus.GENERATING });
+                  }
+                }
+              }
+              else if (update.type === 'result' && update.result) {
+                // Process individual word result
+                const { word, success, filePath, explanation, error } = update.result;
+                const wordId = wordIdMap[word];
+                
                 if (wordId) {
-                  updateWord(wordId, { status: WordStatus.GENERATING });
-                }
-              }
-            }
-            else if (update.type === 'result' && update.result) {
-              // Process individual word result
-              const { word, success, filePath, explanation, error } = update.result;
-              const wordId = validWordIds[update.processed - 1];
-              
-              if (wordId) {
-                if (success) {
-                  updateWord(wordId, {
-                    audioPath: filePath,
-                    explanation,
-                    status: WordStatus.COMPLETE,
-                    lastGenerated: new Date()
-                  });
+                  if (success) {
+                    updateWord(wordId, {
+                      audioPath: filePath,
+                      explanation,
+                      status: WordStatus.COMPLETE,
+                      lastGenerated: new Date()
+                    });
+                    
+                    successfulCount++;
+                  } else {
+                    updateWord(wordId, {
+                      status: WordStatus.ERROR,
+                      errorMessage: error
+                    });
+                    
+                    failedCount++;
+                  }
+                  
+                  processedCount++;
                   
                   setGenerationProgress(prev => ({
                     ...prev,
-                    processed: update.processed,
-                    successful: prev.successful + 1
-                  }));
-                } else {
-                  updateWord(wordId, {
-                    status: WordStatus.ERROR,
-                    errorMessage: error
-                  });
-                  
-                  setGenerationProgress(prev => ({
-                    ...prev,
-                    processed: update.processed,
-                    failed: prev.failed + 1
+                    processed: processedCount,
+                    successful: successfulCount,
+                    failed: failedCount
                   }));
                 }
               }
+              else if (update.type === 'complete') {
+                // Language group processing complete
+                processedCount = update.processed;
+              }
+              else if (update.type === 'error') {
+                throw new Error(update.error || 'Unknown error in batch processing');
+              }
+            } catch (error) {
+              console.error('Error parsing streaming response:', error, line);
             }
-            else if (update.type === 'complete') {
-              // All words processed
-              setGenerationProgress(prev => ({
-                ...prev,
-                processed: update.total,
-                total: update.total
-              }));
-            }
-            else if (update.type === 'error') {
-              throw new Error(update.error || 'Unknown error in batch processing');
-            }
-          } catch (error) {
-            console.error('Error parsing streaming response:', error, line);
           }
         }
       }
+      
+      // Final update to progress
+      setGenerationProgress(prev => ({
+        ...prev,
+        processed: validWordIds.length,
+        total: validWordIds.length,
+        successful: successfulCount,
+        failed: failedCount
+      }));
       
       return true;
     } catch (error) {
@@ -383,7 +500,7 @@ export function useWords() {
     } finally {
       setIsGenerating(false);
     }
-  }, [words, updateWord, isGenerating]);
+  }, [words, updateWord, isGenerating, settings.currentLanguage]);
   
   // Calculate estimated time remaining
   useEffect(() => {
@@ -427,6 +544,13 @@ export function useWords() {
     deleteWord,
     getWordById,
     
+    // Language operations
+    currentLanguage: settings.currentLanguage,
+    setCurrentLanguage,
+    getCurrentLanguageConfig,
+    getWordsByLanguage,
+    getCurrentLanguageWords,
+    
     // Playlist operations
     playlists: getAllPlaylists(),
     playlistsMap: playlists,
@@ -434,6 +558,8 @@ export function useWords() {
     updatePlaylist,
     deletePlaylist,
     getPlaylistById,
+    getPlaylistsByLanguage,
+    getCurrentLanguagePlaylists,
     addWordToPlaylist,
     removeWordFromPlaylist,
     
@@ -443,6 +569,15 @@ export function useWords() {
     isGenerating,
     generationProgress,
     
+    // Settings
+    settings,
+    updateSettings: (updates: Partial<UserSettings>) => {
+      setSettings(prev => ({
+        ...prev,
+        ...updates
+      }));
+    },
+    
     // Helper computed properties
     wordCount: Object.keys(words).length,
     playlistCount: Object.keys(playlists).length,
@@ -451,6 +586,12 @@ export function useWords() {
       w.status === WordStatus.IDLE || 
       w.status === WordStatus.PENDING
     ).length,
-    errorWordCount: Object.values(words).filter(w => w.status === WordStatus.ERROR).length
+    errorWordCount: Object.values(words).filter(w => w.status === WordStatus.ERROR).length,
+    
+    // Language-specific counts
+    currentLanguageWordCount: getCurrentLanguageWords().length,
+    currentLanguageGeneratedCount: getCurrentLanguageWords().filter(w => 
+      w.status === WordStatus.COMPLETE
+    ).length
   };
 }

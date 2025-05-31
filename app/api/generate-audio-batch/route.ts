@@ -2,10 +2,13 @@ import { NextRequest } from 'next/server';
 import { OpenAI } from 'openai';
 import fs from 'fs/promises';
 import path from 'path';
+import { Language } from '@/lib/types';
+import { getLanguageConfig, formatPrompt } from '@/lib/languageConfigs';
 
 // Define interfaces for request and response
 interface GenerateAudioBatchRequest {
   words: string[];
+  language?: Language;
 }
 
 interface WordProcessingResult {
@@ -14,6 +17,7 @@ interface WordProcessingResult {
   filePath?: string;
   explanation?: string;
   error?: string;
+  language?: Language;
 }
 
 interface ProgressUpdate {
@@ -100,7 +104,7 @@ async function processBatchRequest(
   try {
     // Parse request body
     const body = await request.json() as GenerateAudioBatchRequest;
-    const { words } = body;
+    const { words, language = Language.CHINESE } = body;
 
     // Validate input
     if (!Array.isArray(words) || words.length === 0) {
@@ -123,6 +127,9 @@ async function processBatchRequest(
 
     const client = new OpenAI({ apiKey });
     
+    // Get language configuration
+    const languageConfig = getLanguageConfig(language);
+    
     // Ensure audio directory exists
     const audioDir = path.join(process.cwd(), 'public', 'audio');
     await ensureDirectoryExists(audioDir);
@@ -141,10 +148,9 @@ async function processBatchRequest(
       } as ProgressUpdate);
 
       try {
-        // Define prompts (same as single word endpoint)
-        const systemCommand = `You are a helpful Chinese language tutor, skilled in explaining new vocabulary in an easy to understand way for users who already know only a few elementary Chinese words. You will be given a Chinese word, and you will need to explain its meaning.`;
-        
-        const userCommand = `Create an easy to understand chinese sentence for this word that will let me easily infer the meaning of this word: "${word}", then explain the meaning using very simple chinese words. Use this format: 这个词是"${word}"。"${word}"的意思是。。。，英文翻译是。。。比如，。。。"`;
+        // Define prompts using language configuration
+        const systemCommand = languageConfig.systemPrompt;
+        const userCommand = formatPrompt(languageConfig.userPromptTemplate, word);
 
         // Generate explanation using Chat API
         const chatModel = process.env.OPENAI_CHAT_MODEL || 'gpt-4-turbo-preview';
@@ -158,9 +164,9 @@ async function processBatchRequest(
 
         const explanation = completion.choices[0].message.content || '';
         
-        // Generate speech using TTS API
+        // Generate speech using TTS API with language-specific voice
         const ttsModel = process.env.OPENAI_TTS_MODEL || 'tts-1';
-        const ttsVoice = process.env.OPENAI_TTS_VOICE || 'echo';
+        const ttsVoice = languageConfig.ttsVoice;
         
         const speechResponse = await client.audio.speech.create({
           model: ttsModel,
@@ -171,17 +177,18 @@ async function processBatchRequest(
         // Get audio data as buffer
         const audioData = Buffer.from(await speechResponse.arrayBuffer());
         
-        // Save audio file
-        const fileName = `${word}.mp3`;
+        // Save audio file with language code in filename for organization
+        const fileName = `${language}_${word}.mp3`;
         const filePath = path.join(audioDir, fileName);
         await fs.writeFile(filePath, audioData);
         
-        // Add to results
+        // Add to results with language information
         const result: WordProcessingResult = {
           word,
           success: true,
           filePath: `/audio/${fileName}`,
-          explanation
+          explanation,
+          language
         };
         results.push(result);
 
@@ -196,11 +203,12 @@ async function processBatchRequest(
       } catch (error) {
         console.error(`Error processing word "${word}":`, error);
         
-        // Add failed result
+        // Add failed result with language information
         const result: WordProcessingResult = {
           word,
           success: false,
-          error: error instanceof Error ? error.message : 'Unknown error occurred'
+          error: error instanceof Error ? error.message : 'Unknown error occurred',
+          language
         };
         results.push(result);
 

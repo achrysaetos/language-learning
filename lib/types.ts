@@ -2,6 +2,17 @@
  * Core data types for the language learning application
  */
 
+// Supported languages
+export enum Language {
+  CHINESE = 'chinese',
+  SPANISH = 'spanish',
+  FRENCH = 'french',
+  GERMAN = 'german',
+  ITALIAN = 'italian',
+  JAPANESE = 'japanese',
+  KOREAN = 'korean'
+}
+
 // Word status during generation process
 export enum WordStatus {
   IDLE = 'idle',           // Not yet processed
@@ -11,11 +22,22 @@ export enum WordStatus {
   ERROR = 'error'          // Failed to generate
 }
 
+// Language-specific configuration
+export interface LanguageConfig {
+  code: Language;          // Language code
+  displayName: string;     // Display name of the language
+  ttsVoice: string;        // Preferred TTS voice for this language
+  systemPrompt: string;    // System prompt for explanation generation
+  userPromptTemplate: string; // Template for user prompt (with {word} placeholder)
+  exampleFormat?: string;  // Optional format for examples
+}
+
 // Word object representing a vocabulary item
 export interface Word {
   id: string;              // Unique identifier (can be the word itself or a UUID)
-  word: string;            // The Chinese word/character
-  pinyin?: string;         // Optional pinyin pronunciation
+  word: string;            // The vocabulary word/character
+  languageCode: Language;  // Language of the word (default to Chinese for backward compatibility)
+  pinyin?: string;         // Optional pronunciation guide (pinyin for Chinese, etc.)
   explanation?: string;    // Explanation and example sentences
   translation?: string;    // English translation
   audioPath?: string;      // Path to the audio file
@@ -34,6 +56,7 @@ export interface Playlist {
   createdAt: Date;         // When the playlist was created
   lastPlayed?: Date;       // When the playlist was last played
   playCount: number;       // Number of times played
+  languageCode?: Language; // Optional language filter for the playlist
 }
 
 // Audio player state
@@ -60,10 +83,12 @@ export interface GenerationProgress {
 // API Request Types
 export interface GenerateAudioRequest {
   word: string;
+  language?: Language;     // Language of the word (optional for backward compatibility)
 }
 
 export interface GenerateAudioBatchRequest {
   words: string[];
+  language?: Language;     // Language of the words (optional for backward compatibility)
 }
 
 // API Response Types
@@ -72,10 +97,12 @@ export interface GenerateAudioResponse {
   filePath?: string;
   explanation?: string;
   error?: string;
+  language?: Language;     // Language of the response
 }
 
 export interface WordProcessingResult {
   word: string;
+  language?: Language;     // Language of the word
   success: boolean;
   filePath?: string;
   explanation?: string;
@@ -96,12 +123,14 @@ export interface ProgressUpdate {
 export enum StorageKeys {
   WORDS = 'language-app-words',
   PLAYLISTS = 'language-app-playlists',
-  SETTINGS = 'language-app-settings'
+  SETTINGS = 'language-app-settings',
+  LANGUAGE_CONFIGS = 'language-app-language-configs'
 }
 
 // User preferences/settings
 export interface UserSettings {
   defaultVoice: string;    // Default TTS voice
+  currentLanguage: Language; // Current selected language
   autoPlay: boolean;       // Auto-play after generation
   darkMode: boolean;       // UI theme preference
   repeatCount: number;     // How many times to repeat each word

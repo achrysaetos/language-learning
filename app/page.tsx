@@ -9,9 +9,9 @@ export default function Home() {
       {/* Simple Header */}
       <header className="border-b">
         <div className="container mx-auto py-4">
-          <h1 className="text-2xl font-bold tracking-tight">Chinese Vocabulary Learning</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Multi-Language Vocabulary Learning</h1>
           <p className="text-muted-foreground text-sm">
-            Add words, generate audio, and learn Chinese vocabulary
+            Add words, generate audio, and learn vocabulary in multiple languages
           </p>
         </div>
       </header>
@@ -24,7 +24,7 @@ export default function Home() {
       {/* Simple Footer */}
       <footer className="border-t mt-6">
         <div className="container mx-auto py-4 text-center text-xs text-muted-foreground">
-          <p>Chinese Vocabulary Learning App — Built with Next.js and OpenAI</p>
+          <p>Multi-Language Vocabulary Learning App — Built with Next.js and OpenAI</p>
         </div>
       </footer>
     </div>

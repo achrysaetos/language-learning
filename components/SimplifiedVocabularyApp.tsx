@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useWords } from '@/hooks/useWords';
-import { Word, WordStatus } from '@/lib/types';
+import { Word, WordStatus, Language } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -28,12 +28,14 @@ import {
   SkipBack,
   X,
   RefreshCw,
-  Filter
+  Filter,
+  Globe
 } from 'lucide-react';
+import { getLanguageDisplayNames, getAllLanguageConfigs } from '@/lib/languageConfigs';
 
 /**
  * SimplifiedVocabularyApp component
- * A unified interface for managing Chinese vocabulary with audio playback
+ * A unified interface for managing vocabulary with audio playback in multiple languages
  */
 export default function SimplifiedVocabularyApp() {
   // Get word management functions from custom hook
@@ -47,6 +49,16 @@ export default function SimplifiedVocabularyApp() {
     generateAudioBatch,
     isGenerating,
     generationProgress,
+    
+    // Language-related functions
+    currentLanguage,
+    setCurrentLanguage,
+    getCurrentLanguageConfig,
+    getCurrentLanguageWords,
+    
+    // Stats for current language
+    currentLanguageWordCount,
+    currentLanguageGeneratedCount
   } = useWords();
 
   // Local state for form inputs
@@ -76,9 +88,16 @@ export default function SimplifiedVocabularyApp() {
 
   // Get current word
   const currentWord = currentWordId ? wordsMap[currentWordId] : null;
+  
+  // Get language display names
+  const languageDisplayNames = getLanguageDisplayNames();
+  const languageConfigs = getAllLanguageConfigs();
+  
+  // Get current language configuration
+  const currentLanguageConfig = getCurrentLanguageConfig();
 
   // Filter and sort words
-  const filteredWords = words
+  const filteredWords = getCurrentLanguageWords()
     .filter(word => {
       // Apply search filter
       if (searchQuery && !word.word.includes(searchQuery)) {
@@ -189,7 +208,8 @@ export default function SimplifiedVocabularyApp() {
     }
 
     try {
-      const wordId = addWord(newWord.trim());
+      // Add word with current language
+      const wordId = addWord(newWord.trim(), currentLanguage);
       setNewWord('');
       setError(null);
       
@@ -202,7 +222,7 @@ export default function SimplifiedVocabularyApp() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add word');
     }
-  }, [newWord, addWord, autoGenerate, generateAudio]);
+  }, [newWord, addWord, autoGenerate, generateAudio, currentLanguage]);
 
   // Handle adding multiple words from bulk input
   const handleAddBulkWords = useCallback(() => {
@@ -223,10 +243,10 @@ export default function SimplifiedVocabularyApp() {
         return;
       }
 
-      // Add each word
+      // Add each word with current language
       const addedWordIds: string[] = [];
       wordList.forEach(word => {
-        const wordId = addWord(word);
+        const wordId = addWord(word, currentLanguage);
         addedWordIds.push(wordId);
       });
 
@@ -243,7 +263,7 @@ export default function SimplifiedVocabularyApp() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add words');
     }
-  }, [bulkWords, addWord, autoGenerate, generateAudioBatch]);
+  }, [bulkWords, addWord, autoGenerate, generateAudioBatch, currentLanguage]);
 
   // Handle generating audio for a single word
   const handleGenerateAudio = useCallback(async (wordId: string) => {
@@ -257,7 +277,8 @@ export default function SimplifiedVocabularyApp() {
 
   // Handle generating audio for all words without audio
   const handleGenerateAllAudio = useCallback(async () => {
-    const wordsWithoutAudio = words
+    // Get words without audio for current language only
+    const wordsWithoutAudio = getCurrentLanguageWords()
       .filter(word => word.status === WordStatus.IDLE || word.status === WordStatus.ERROR)
       .map(word => word.id);
     
@@ -272,7 +293,7 @@ export default function SimplifiedVocabularyApp() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate audio batch');
     }
-  }, [words, generateAudioBatch]);
+  }, [getCurrentLanguageWords, generateAudioBatch]);
 
   // Play audio for a word
   const playAudio = useCallback((wordId: string) => {
@@ -363,6 +384,22 @@ export default function SimplifiedVocabularyApp() {
     setShowExplanation(true);
   }, []);
 
+  // Handle language change
+  const handleLanguageChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newLanguage = e.target.value as Language;
+    setCurrentLanguage(newLanguage);
+    // Reset filters when changing language
+    setStatusFilter('all');
+    setSearchQuery('');
+    // Clear current word selection
+    setCurrentWordId(null);
+    setShowPlayer(false);
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    setIsPlaying(false);
+  }, [setCurrentLanguage]);
+
   // Render status badge for a word
   const renderStatusBadge = (status: WordStatus) => {
     switch (status) {
@@ -398,12 +435,29 @@ export default function SimplifiedVocabularyApp() {
       <Card className="mb-8">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle>Chinese Vocabulary</CardTitle>
+            <CardTitle>{languageDisplayNames[currentLanguage]} Vocabulary</CardTitle>
             <CardDescription>
               Add words, generate audio, and listen to pronunciations
             </CardDescription>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-4">
+            {/* Language Selection Dropdown */}
+            <div className="flex items-center space-x-2">
+              <Globe className="h-4 w-4 text-muted-foreground" />
+              <select 
+                className="p-2 border rounded-md text-sm"
+                value={currentLanguage}
+                onChange={handleLanguageChange}
+              >
+                {languageConfigs.map(config => (
+                  <option key={config.code} value={config.code}>
+                    {config.displayName}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {/* Auto-generate Toggle */}
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -429,7 +483,7 @@ export default function SimplifiedVocabularyApp() {
           {showBulkInput ? (
             <div className="space-y-4">
               <Textarea
-                placeholder="Enter multiple words separated by spaces, commas, or new lines"
+                placeholder={`Enter multiple ${languageDisplayNames[currentLanguage]} words separated by spaces, commas, or new lines`}
                 value={bulkWords}
                 onChange={(e) => setBulkWords(e.target.value)}
                 rows={5}
@@ -448,7 +502,7 @@ export default function SimplifiedVocabularyApp() {
           ) : (
             <div className="flex space-x-2">
               <Input
-                placeholder="Enter a Chinese word"
+                placeholder={`Enter a ${languageDisplayNames[currentLanguage]} word`}
                 value={newWord}
                 onChange={(e) => setNewWord(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddWord()}
@@ -480,7 +534,7 @@ export default function SimplifiedVocabularyApp() {
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search words..."
+            placeholder={`Search ${languageDisplayNames[currentLanguage]} words...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-8"
@@ -488,6 +542,14 @@ export default function SimplifiedVocabularyApp() {
         </div>
         
         <div className="flex items-center space-x-2">
+          {/* Language Stats */}
+          <div className="text-sm text-muted-foreground mr-2">
+            <span>{currentLanguageGeneratedCount}</span>
+            <span className="mx-1">/</span>
+            <span>{currentLanguageWordCount}</span>
+            <span className="ml-1">words with audio</span>
+          </div>
+          
           <select 
             className="p-2 border rounded-md text-sm"
             value={statusFilter}
@@ -559,7 +621,7 @@ export default function SimplifiedVocabularyApp() {
       <div className="mb-24" ref={wordListRef}>
         {filteredWords.length === 0 ? (
           <div className="text-center py-12 bg-muted/20 rounded-lg">
-            <p className="text-muted-foreground mb-2">No words match your criteria</p>
+            <p className="text-muted-foreground mb-2">No {languageDisplayNames[currentLanguage]} words match your criteria</p>
             {searchQuery && (
               <Button 
                 variant="outline" 
