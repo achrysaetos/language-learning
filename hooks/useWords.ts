@@ -253,10 +253,13 @@ export function useWords() {
     });
   }, [setPlaylists]);
   
-  // Audio generation functions
-  const generateAudio = useCallback(async (wordId: string) => {
+  // Audio generation functions with retry logic
+  const generateAudio = useCallback(async (wordId: string, retryCount = 0) => {
     const word = words[wordId];
     if (!word) throw new Error(`Word not found: ${wordId}`);
+    
+    const maxRetries = 3;
+    const retryDelay = 1000 * Math.pow(2, retryCount); // Exponential backoff
     
     try {
       // Update status to generating
@@ -289,7 +292,14 @@ export function useWords() {
       
       return data;
     } catch (error) {
-      // Update status to error
+      // Retry logic
+      if (retryCount < maxRetries) {
+        console.log(`Retrying audio generation for ${word.word} (attempt ${retryCount + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        return generateAudio(wordId, retryCount + 1);
+      }
+      
+      // Update status to error after all retries failed
       updateWord(wordId, {
         status: WordStatus.ERROR,
         errorMessage: error instanceof Error ? error.message : 'Unknown error'

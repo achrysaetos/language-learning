@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import SimplifiedVocabularyApp from "@/components/SimplifiedVocabularyApp";
+import SimplifiedVocabularyAppV2 from "@/components/SimplifiedVocabularyAppV2";
 
 export default function Home() {
   return (
@@ -18,7 +18,7 @@ export default function Home() {
 
       {/* Main Content - Simplified All-in-One Interface */}
       <main className="container mx-auto">
-        <SimplifiedVocabularyApp />
+        <SimplifiedVocabularyAppV2 />
       </main>
 
       {/* Simple Footer */}
