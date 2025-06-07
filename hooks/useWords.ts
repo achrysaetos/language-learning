@@ -82,13 +82,11 @@ export function useWords() {
   
   // Word CRUD operations
   const addWord = useCallback((word: string, languageCode?: Language, pinyin?: string) => {
-    const id = word; // Use the word itself as the ID for simplicity
     const language = languageCode || settings.currentLanguage;
+    // Create a unique ID by combining word, language, and timestamp
+    const id = `${language}_${word}_${Date.now()}`;
     
     setWords(prev => {
-      // Skip if word already exists
-      if (prev[id]) return prev;
-      
       return {
         ...prev,
         [id]: {

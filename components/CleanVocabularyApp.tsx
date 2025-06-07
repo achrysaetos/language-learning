@@ -65,11 +65,9 @@ export default function CleanVocabularyApp() {
   useEffect(() => {
     if (!audioRef.current) {
       audioRef.current = new Audio();
-      audioRef.current.addEventListener('ended', handleAudioEnded);
     }
     return () => {
       if (audioRef.current) {
-        audioRef.current.removeEventListener('ended', handleAudioEnded);
         audioRef.current.pause();
       }
     };
@@ -80,17 +78,19 @@ export default function CleanVocabularyApp() {
     setIsPlaying(false);
     
     if (playMode === 'single') {
-      // Do nothing, just stop
+      // Just stop playing
       return;
     }
     
     const currentIndex = wordsWithAudio.findIndex(w => w.id === currentWordId);
     
     if (playMode === 'sequential') {
-      if (currentIndex < wordsWithAudio.length - 1) {
+      if (currentIndex >= 0 && currentIndex < wordsWithAudio.length - 1) {
         const nextWord = wordsWithAudio[currentIndex + 1];
-        setCurrentWordId(nextWord.id);
-        setTimeout(() => setIsPlaying(true), 500);
+        setTimeout(() => {
+          setCurrentWordId(nextWord.id);
+          setIsPlaying(true);
+        }, 500);
       }
     } else if (playMode === 'shuffle') {
       const unplayedWords = wordsWithAudio.filter(w => !playedWords.has(w.id) && w.id !== currentWordId);
@@ -99,8 +99,10 @@ export default function CleanVocabularyApp() {
         const randomIndex = Math.floor(Math.random() * unplayedWords.length);
         const nextWord = unplayedWords[randomIndex];
         setPlayedWords(prev => new Set(prev).add(currentWordId!));
-        setCurrentWordId(nextWord.id);
-        setTimeout(() => setIsPlaying(true), 500);
+        setTimeout(() => {
+          setCurrentWordId(nextWord.id);
+          setIsPlaying(true);
+        }, 500);
       } else {
         // All words played, reset for next shuffle cycle
         setPlayedWords(new Set());
@@ -108,28 +110,60 @@ export default function CleanVocabularyApp() {
     }
   }, [playMode, wordsWithAudio, currentWordId, playedWords]);
 
-  // Update audio source
+  // Update audio source and handle playback
   useEffect(() => {
-    if (currentWord?.audioPath && audioRef.current) {
-      audioRef.current.src = currentWord.audioPath;
+    if (!audioRef.current) return;
+    
+    const audio = audioRef.current;
+    
+    // Clean up previous audio
+    audio.pause();
+    audio.removeEventListener('ended', handleAudioEnded);
+    
+    if (currentWord?.audioPath) {
+      // Set new source and add event listener
+      audio.src = currentWord.audioPath;
+      audio.load(); // Force reload the audio element
+      audio.addEventListener('ended', handleAudioEnded);
+      
+      // Add error handler
+      const handleError = () => {
+        setIsPlaying(false);
+      };
+      audio.addEventListener('error', handleError);
+      
       if (isPlaying) {
-        audioRef.current.play().catch(console.error);
-      } else {
-        audioRef.current.pause();
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {
+            setIsPlaying(false);
+          });
+        }
       }
+      
+      return () => {
+        audio.removeEventListener('ended', handleAudioEnded);
+        audio.removeEventListener('error', handleError);
+      };
+    } else {
+      audio.src = '';
+      setIsPlaying(false);
     }
-  }, [currentWord, isPlaying]);
+  }, [currentWord, isPlaying, handleAudioEnded]);
 
   // Add word
-  const handleAddWord = useCallback(() => {
+  const handleAddWord = useCallback(async () => {
     if (!newWord.trim()) return;
     
-    const wordId = addWord(newWord.trim(), currentLanguage);
+    const trimmedWord = newWord.trim();
+    const wordId = addWord(trimmedWord, currentLanguage);
     setNewWord('');
     
     // Auto-generate audio if enabled
-    if (autoGenerate) {
-      generateAudio(wordId).catch(console.error);
+    if (autoGenerate && wordId) {
+      generateAudio(wordId).catch(() => {
+        // Error is handled in the hook, just catch to prevent unhandled promise rejection
+      });
     }
     
     inputRef.current?.focus();
@@ -142,7 +176,9 @@ export default function CleanVocabularyApp() {
       .map(w => w.id);
     
     if (wordsNeedingAudio.length > 0) {
-      generateAudioBatch(wordsNeedingAudio).catch(console.error);
+      generateAudioBatch(wordsNeedingAudio).catch(() => {
+        // Error is handled in the hook
+      });
     }
   }, [words, generateAudioBatch]);
 
@@ -150,6 +186,7 @@ export default function CleanVocabularyApp() {
   const playWord = useCallback((wordId: string) => {
     if (currentWordId === wordId && isPlaying) {
       setIsPlaying(false);
+      audioRef.current?.pause();
     } else {
       setCurrentWordId(wordId);
       setIsPlaying(true);
@@ -160,7 +197,8 @@ export default function CleanVocabularyApp() {
   const playNext = useCallback(() => {
     const currentIndex = wordsWithAudio.findIndex(w => w.id === currentWordId);
     if (currentIndex < wordsWithAudio.length - 1) {
-      setCurrentWordId(wordsWithAudio[currentIndex + 1].id);
+      const nextWord = wordsWithAudio[currentIndex + 1];
+      setCurrentWordId(nextWord.id);
       setIsPlaying(true);
     }
   }, [currentWordId, wordsWithAudio]);
@@ -168,22 +206,27 @@ export default function CleanVocabularyApp() {
   const playPrevious = useCallback(() => {
     const currentIndex = wordsWithAudio.findIndex(w => w.id === currentWordId);
     if (currentIndex > 0) {
-      setCurrentWordId(wordsWithAudio[currentIndex - 1].id);
+      const prevWord = wordsWithAudio[currentIndex - 1];
+      setCurrentWordId(prevWord.id);
       setIsPlaying(true);
     }
   }, [currentWordId, wordsWithAudio]);
 
   const playAll = useCallback(() => {
-    if (wordsWithAudio.length > 0) {
-      setPlayedWords(new Set());
-      if (playMode === 'shuffle') {
-        const randomIndex = Math.floor(Math.random() * wordsWithAudio.length);
-        setCurrentWordId(wordsWithAudio[randomIndex].id);
-      } else {
-        setCurrentWordId(wordsWithAudio[0].id);
-      }
-      setIsPlaying(true);
+    if (wordsWithAudio.length === 0) return;
+    
+    setPlayedWords(new Set());
+    
+    if (playMode === 'shuffle') {
+      // Start with a random word in shuffle mode
+      const randomIndex = Math.floor(Math.random() * wordsWithAudio.length);
+      setCurrentWordId(wordsWithAudio[randomIndex].id);
+    } else {
+      // Start with first word in sequential/single mode
+      setCurrentWordId(wordsWithAudio[0].id);
     }
+    
+    setIsPlaying(true);
   }, [wordsWithAudio, playMode]);
 
   const cyclePlayMode = useCallback(() => {
