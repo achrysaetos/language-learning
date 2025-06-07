@@ -4,6 +4,7 @@ import { Word, WordStatus, Language } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
 import { 
   Play, 
   Pause,
@@ -14,13 +15,17 @@ import {
   SkipBack,
   Sparkles,
   Globe,
-  BookOpen
+  BookOpen,
+  Shuffle,
+  Repeat
 } from 'lucide-react';
 import { getLanguageDisplayNames } from '@/lib/languageConfigs';
 import { cn } from '@/lib/utils';
 import { SimplePractice } from './SimplePractice';
 
-export default function SimpleVocabularyApp() {
+type PlayMode = 'single' | 'sequential' | 'shuffle';
+
+export default function CleanVocabularyApp() {
   const {
     wordsMap,
     addWord,
@@ -41,6 +46,10 @@ export default function SimpleVocabularyApp() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentWordId, setCurrentWordId] = useState<string | null>(null);
   const [showPractice, setShowPractice] = useState(false);
+  const [autoGenerate, setAutoGenerate] = useState(true);
+  const [playMode, setPlayMode] = useState<PlayMode>('sequential');
+  const [playedWords, setPlayedWords] = useState<Set<string>>(new Set());
+  
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -56,18 +65,48 @@ export default function SimpleVocabularyApp() {
   useEffect(() => {
     if (!audioRef.current) {
       audioRef.current = new Audio();
-      audioRef.current.addEventListener('ended', () => {
-        setIsPlaying(false);
-        // Auto-play next
-        const currentIndex = wordsWithAudio.findIndex(w => w.id === currentWordId);
-        if (currentIndex < wordsWithAudio.length - 1) {
-          const nextWord = wordsWithAudio[currentIndex + 1];
-          setCurrentWordId(nextWord.id);
-          setTimeout(() => setIsPlaying(true), 500);
-        }
-      });
+      audioRef.current.addEventListener('ended', handleAudioEnded);
     }
-  }, [currentWordId, wordsWithAudio]);
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.removeEventListener('ended', handleAudioEnded);
+        audioRef.current.pause();
+      }
+    };
+  }, []);
+
+  // Handle audio ended
+  const handleAudioEnded = useCallback(() => {
+    setIsPlaying(false);
+    
+    if (playMode === 'single') {
+      // Do nothing, just stop
+      return;
+    }
+    
+    const currentIndex = wordsWithAudio.findIndex(w => w.id === currentWordId);
+    
+    if (playMode === 'sequential') {
+      if (currentIndex < wordsWithAudio.length - 1) {
+        const nextWord = wordsWithAudio[currentIndex + 1];
+        setCurrentWordId(nextWord.id);
+        setTimeout(() => setIsPlaying(true), 500);
+      }
+    } else if (playMode === 'shuffle') {
+      const unplayedWords = wordsWithAudio.filter(w => !playedWords.has(w.id) && w.id !== currentWordId);
+      
+      if (unplayedWords.length > 0) {
+        const randomIndex = Math.floor(Math.random() * unplayedWords.length);
+        const nextWord = unplayedWords[randomIndex];
+        setPlayedWords(prev => new Set(prev).add(currentWordId!));
+        setCurrentWordId(nextWord.id);
+        setTimeout(() => setIsPlaying(true), 500);
+      } else {
+        // All words played, reset for next shuffle cycle
+        setPlayedWords(new Set());
+      }
+    }
+  }, [playMode, wordsWithAudio, currentWordId, playedWords]);
 
   // Update audio source
   useEffect(() => {
@@ -88,11 +127,13 @@ export default function SimpleVocabularyApp() {
     const wordId = addWord(newWord.trim(), currentLanguage);
     setNewWord('');
     
-    // Auto-generate audio for the new word
-    generateAudio(wordId).catch(console.error);
+    // Auto-generate audio if enabled
+    if (autoGenerate) {
+      generateAudio(wordId).catch(console.error);
+    }
     
     inputRef.current?.focus();
-  }, [newWord, addWord, generateAudio, currentLanguage]);
+  }, [newWord, addWord, generateAudio, currentLanguage, autoGenerate]);
 
   // Generate all missing audio
   const handleGenerateAll = useCallback(() => {
@@ -112,6 +153,7 @@ export default function SimpleVocabularyApp() {
     } else {
       setCurrentWordId(wordId);
       setIsPlaying(true);
+      setPlayedWords(new Set([wordId]));
     }
   }, [currentWordId, isPlaying]);
 
@@ -133,10 +175,39 @@ export default function SimpleVocabularyApp() {
 
   const playAll = useCallback(() => {
     if (wordsWithAudio.length > 0) {
-      setCurrentWordId(wordsWithAudio[0].id);
+      setPlayedWords(new Set());
+      if (playMode === 'shuffle') {
+        const randomIndex = Math.floor(Math.random() * wordsWithAudio.length);
+        setCurrentWordId(wordsWithAudio[randomIndex].id);
+      } else {
+        setCurrentWordId(wordsWithAudio[0].id);
+      }
       setIsPlaying(true);
     }
-  }, [wordsWithAudio]);
+  }, [wordsWithAudio, playMode]);
+
+  const cyclePlayMode = useCallback(() => {
+    const modes: PlayMode[] = ['sequential', 'shuffle', 'single'];
+    const currentIndex = modes.indexOf(playMode);
+    const nextIndex = (currentIndex + 1) % modes.length;
+    setPlayMode(modes[nextIndex]);
+  }, [playMode]);
+
+  const getPlayModeIcon = () => {
+    switch (playMode) {
+      case 'shuffle': return <Shuffle className="h-4 w-4" />;
+      case 'single': return <Volume2 className="h-4 w-4" />;
+      default: return <Repeat className="h-4 w-4" />;
+    }
+  };
+
+  const getPlayModeTooltip = () => {
+    switch (playMode) {
+      case 'shuffle': return 'Shuffle';
+      case 'single': return 'Single';
+      default: return 'Sequential';
+    }
+  };
 
   return (
     <div className="max-w-2xl mx-auto py-6 px-4">
@@ -156,8 +227,17 @@ export default function SimpleVocabularyApp() {
             ))}
           </select>
         </div>
-        <div className="text-sm text-muted-foreground">
-          {currentLanguageGeneratedCount} of {currentLanguageWordCount} ready
+        <div className="flex items-center space-x-4">
+          <label className="flex items-center space-x-2 text-sm">
+            <Switch
+              checked={autoGenerate}
+              onCheckedChange={setAutoGenerate}
+            />
+            <span>Auto-generate</span>
+          </label>
+          <div className="text-sm text-muted-foreground">
+            {currentLanguageGeneratedCount}/{currentLanguageWordCount}
+          </div>
         </div>
       </div>
 
@@ -180,7 +260,7 @@ export default function SimpleVocabularyApp() {
       {/* Quick Actions */}
       {words.length > 0 && (
         <div className="flex justify-between items-center mb-4">
-          <div className="flex space-x-2">
+          <div className="flex items-center space-x-2">
             <Button 
               variant="outline" 
               size="sm"
@@ -192,13 +272,24 @@ export default function SimpleVocabularyApp() {
             </Button>
             <Button 
               variant="outline" 
-              size="sm"
-              onClick={handleGenerateAll}
-              disabled={isGenerating || words.every(w => w.status === WordStatus.COMPLETE)}
+              size="icon"
+              onClick={cyclePlayMode}
+              disabled={wordsWithAudio.length === 0}
+              title={getPlayModeTooltip()}
             >
-              <Sparkles className="h-4 w-4 mr-1" />
-              Generate Missing
+              {getPlayModeIcon()}
             </Button>
+            {!autoGenerate && (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleGenerateAll}
+                disabled={isGenerating || words.every(w => w.status === WordStatus.COMPLETE)}
+              >
+                <Sparkles className="h-4 w-4 mr-1" />
+                Generate All
+              </Button>
+            )}
             {wordsWithAudio.length > 0 && (
               <Button 
                 variant="outline" 
@@ -206,15 +297,10 @@ export default function SimpleVocabularyApp() {
                 onClick={() => setShowPractice(!showPractice)}
               >
                 <BookOpen className="h-4 w-4 mr-1" />
-                {showPractice ? 'Back to Words' : 'Practice'}
+                Practice
               </Button>
             )}
           </div>
-          {wordsWithAudio.length > 0 && !showPractice && (
-            <div className="text-sm text-muted-foreground">
-              {wordsWithAudio.length} words ready
-            </div>
-          )}
         </div>
       )}
 
@@ -276,12 +362,12 @@ export default function SimpleVocabularyApp() {
                   <div className="w-9 h-9 flex items-center justify-center">
                     <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                   </div>
-                ) : word.status === WordStatus.ERROR ? (
+                ) : (word.status === WordStatus.ERROR || word.status === WordStatus.IDLE) && !autoGenerate ? (
                   <Button
                     variant="ghost"
                     size="icon"
                     onClick={() => generateAudio(word.id)}
-                    className="text-rose-500"
+                    className={word.status === WordStatus.ERROR ? "text-rose-500" : ""}
                   >
                     <Sparkles className="h-4 w-4" />
                   </Button>
