@@ -170,7 +170,7 @@ async function processBatchRequest(
         
         const speechResponse = await client.audio.speech.create({
           model: ttsModel,
-          voice: ttsVoice,
+          voice: ttsVoice as any, // OpenAI SDK expects specific voice types
           input: explanation
         });
 

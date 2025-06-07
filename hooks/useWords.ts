@@ -67,11 +67,11 @@ export function useWords() {
         const updated = { ...prev };
         
         for (const id in updated) {
-          if (!('languageCode' in updated[id])) {
-            updated[id] = {
-              ...updated[id],
+          const word = updated[id];
+          if (word && !('languageCode' in word)) {
+            updated[id] = Object.assign({}, word, {
               languageCode: Language.CHINESE
-            };
+            });
           }
         }
         
@@ -315,7 +315,7 @@ export function useWords() {
     }
     
     // Get the actual words from the IDs and group by language
-    const wordsByLanguage: Record<Language, { id: string, word: string }[]> = {};
+    const wordsByLanguage: Partial<Record<Language, { id: string, word: string }[]>> = {};
     
     validWordIds.forEach(id => {
       const word = words[id];
@@ -352,6 +352,8 @@ export function useWords() {
       
       for (const language in wordsByLanguage) {
         const wordsInLanguage = wordsByLanguage[language as Language];
+        if (!wordsInLanguage) continue;
+        
         const wordTexts = wordsInLanguage.map(w => w.word);
         const languageCode = language as Language;
         
@@ -381,9 +383,11 @@ export function useWords() {
         
         // Map of word text to word ID for this language group
         const wordIdMap: Record<string, string> = {};
-        wordsInLanguage.forEach(w => {
-          wordIdMap[w.word] = w.id;
-        });
+        if (wordsInLanguage) {
+          wordsInLanguage.forEach(w => {
+            wordIdMap[w.word] = w.id;
+          });
+        }
         
         while (true) {
           const { done, value } = await reader.read();
