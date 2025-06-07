@@ -1,9 +1,8 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Word, WordStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { Volume2, Check, X, RotateCcw } from 'lucide-react';
+import { Volume2, ChevronLeft, ChevronRight, RotateCcw, Eye, EyeOff, Shuffle } from 'lucide-react';
 
 interface SimplePracticeProps {
   words: Word[];
@@ -12,36 +11,98 @@ interface SimplePracticeProps {
 }
 
 export function SimplePractice({ words, onPlayAudio, onClose }: SimplePracticeProps) {
-  const practiceWords = words.filter(w => w.status === WordStatus.COMPLETE);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [userInput, setUserInput] = useState('');
-  const [showResult, setShowResult] = useState(false);
-  const [score, setScore] = useState(0);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [isFlipped, setIsFlipped] = useState(false);
+  const [isShuffled, setIsShuffled] = useState(false);
+  
+  // Filter and optionally shuffle words
+  const practiceWords = useMemo(() => {
+    const filtered = words.filter(w => w.status === WordStatus.COMPLETE);
+    if (!isShuffled) return filtered;
+    
+    // Shuffle array
+    const shuffled = [...filtered];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }, [words, isShuffled]);
   
   const currentWord = practiceWords[currentIndex];
-  const isComplete = currentIndex >= practiceWords.length;
+  const hasNext = currentIndex < practiceWords.length - 1;
+  const hasPrevious = currentIndex > 0;
 
-  const handleCheck = useCallback(() => {
-    if (!userInput.trim()) return;
-    
-    const isCorrect = userInput.trim().toLowerCase() === currentWord.word.toLowerCase();
-    if (isCorrect) setScore(score + 1);
-    
-    setShowResult(true);
-    
-    setTimeout(() => {
+  const handleNext = useCallback(() => {
+    if (hasNext) {
       setCurrentIndex(currentIndex + 1);
-      setUserInput('');
-      setShowResult(false);
-    }, 2000);
-  }, [userInput, currentWord, currentIndex, score]);
+      setShowAnswer(false);
+      setIsFlipped(false);
+    }
+  }, [currentIndex, hasNext]);
+
+  const handlePrevious = useCallback(() => {
+    if (hasPrevious) {
+      setCurrentIndex(currentIndex - 1);
+      setShowAnswer(false);
+      setIsFlipped(false);
+    }
+  }, [currentIndex, hasPrevious]);
+
+  const handleFlip = useCallback(() => {
+    setIsFlipped(!isFlipped);
+    setShowAnswer(!showAnswer);
+  }, [isFlipped, showAnswer]);
 
   const handleRestart = useCallback(() => {
     setCurrentIndex(0);
-    setScore(0);
-    setUserInput('');
-    setShowResult(false);
+    setShowAnswer(false);
+    setIsFlipped(false);
   }, []);
+
+  const toggleShuffle = useCallback(() => {
+    setIsShuffled(!isShuffled);
+    setCurrentIndex(0);
+    setShowAnswer(false);
+    setIsFlipped(false);
+  }, [isShuffled]);
+
+  const handlePlayAudio = useCallback(() => {
+    if (currentWord) {
+      onPlayAudio(currentWord.id);
+    }
+  }, [currentWord, onPlayAudio]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      switch (e.key) {
+        case 'ArrowLeft':
+          handlePrevious();
+          break;
+        case 'ArrowRight':
+          handleNext();
+          break;
+        case ' ':
+        case 'Enter':
+          e.preventDefault();
+          handleFlip();
+          break;
+        case 'p':
+        case 'P':
+          e.preventDefault();
+          handlePlayAudio();
+          break;
+        case 'Escape':
+          onClose();
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleNext, handlePrevious, handleFlip, handlePlayAudio, onClose]);
 
   if (practiceWords.length === 0) {
     return (
@@ -54,89 +115,144 @@ export function SimplePractice({ words, onPlayAudio, onClose }: SimplePracticePr
     );
   }
 
-  if (isComplete) {
-    return (
-      <Card className="p-6 text-center">
-        <h3 className="text-xl font-semibold mb-4">Practice Complete!</h3>
-        <p className="text-lg mb-6">
-          Your score: {score} / {practiceWords.length}
-        </p>
-        <div className="flex justify-center space-x-2">
-          <Button onClick={handleRestart}>
-            <RotateCcw className="h-4 w-4 mr-2" />
-            Try Again
+  return (
+    <div className="space-y-4">
+      {/* Progress indicator */}
+      <div className="space-y-2">
+        <div className="text-center text-sm text-muted-foreground">
+          Card {currentIndex + 1} of {practiceWords.length}
+          {isShuffled && <span className="ml-2 text-primary">(Shuffled)</span>}
+        </div>
+        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+          <div 
+            className="bg-primary h-1.5 rounded-full transition-all duration-300"
+            style={{ width: `${((currentIndex + 1) / practiceWords.length) * 100}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Flashcard */}
+      <div className="relative" style={{ perspective: '1000px' }}>
+        <Card 
+          className={`relative min-h-[300px] p-8 cursor-pointer transition-all duration-500 hover:shadow-lg transform-gpu ${
+            isFlipped ? 'rotate-y-180' : ''
+          }`}
+          style={{
+            transformStyle: 'preserve-3d',
+            transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)'
+          }}
+          onClick={handleFlip}
+        >
+          {/* Front of card */}
+          <div 
+            className="absolute inset-0 p-8 flex flex-col items-center justify-center"
+            style={{ backfaceVisibility: 'hidden' }}
+          >
+            <h2 className="text-3xl font-bold text-center mb-6">{currentWord.word}</h2>
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePlayAudio();
+              }}
+            >
+              <Volume2 className="h-5 w-5 mr-2" />
+              Play Audio
+            </Button>
+            <p className="text-sm text-muted-foreground absolute bottom-4">
+              Tap card to see explanation
+            </p>
+            <EyeOff className="h-4 w-4 text-muted-foreground absolute top-4 right-4" />
+          </div>
+
+          {/* Back of card */}
+          <div 
+            className="absolute inset-0 p-8 flex flex-col items-center justify-center"
+            style={{ 
+              backfaceVisibility: 'hidden',
+              transform: 'rotateY(180deg)'
+            }}
+          >
+            <div className="text-center space-y-4 max-w-lg">
+              <h3 className="text-xl font-semibold">{currentWord.word}</h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handlePlayAudio();
+                }}
+              >
+                <Volume2 className="h-4 w-4 mr-2" />
+                Play
+              </Button>
+              {currentWord.explanation && (
+                <p className="text-sm leading-relaxed whitespace-pre-wrap overflow-y-auto max-h-40 mt-4">
+                  {currentWord.explanation}
+                </p>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground absolute bottom-4">
+              Tap card to flip back
+            </p>
+            <Eye className="h-4 w-4 text-muted-foreground absolute top-4 right-4" />
+          </div>
+        </Card>
+      </div>
+
+      {/* Navigation controls */}
+      <div className="flex justify-between items-center">
+        <Button
+          variant="outline"
+          onClick={handlePrevious}
+          disabled={!hasPrevious}
+        >
+          <ChevronLeft className="h-4 w-4 mr-1" />
+          Previous
+        </Button>
+
+        <div className="flex space-x-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={toggleShuffle}
+            title={isShuffled ? "Order mode" : "Shuffle mode"}
+            className={isShuffled ? "text-primary" : ""}
+          >
+            <Shuffle className="h-4 w-4" />
           </Button>
-          <Button variant="outline" onClick={onClose}>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleRestart}
+            title="Start over"
+          >
+            <RotateCcw className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            onClick={onClose}
+          >
             Exit
           </Button>
         </div>
-      </Card>
-    );
-  }
 
-  return (
-    <Card className="p-6">
-      <div className="mb-6 text-center">
-        <p className="text-sm text-muted-foreground mb-2">
-          Question {currentIndex + 1} of {practiceWords.length}
-        </p>
         <Button
           variant="outline"
-          size="lg"
-          onClick={() => onPlayAudio(currentWord.id)}
-          className="mb-4"
+          onClick={handleNext}
+          disabled={!hasNext}
         >
-          <Volume2 className="h-5 w-5 mr-2" />
-          Play Audio
+          Next
+          <ChevronRight className="h-4 w-4 ml-1" />
         </Button>
-        <p className="text-sm text-muted-foreground">
-          Listen and type what you hear
-        </p>
       </div>
 
-      <div className="space-y-4">
-        <Input
-          value={userInput}
-          onChange={(e) => setUserInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleCheck()}
-          placeholder="Type your answer..."
-          disabled={showResult}
-          className="text-center text-lg"
-        />
-
-        {showResult && (
-          <div className={`text-center p-3 rounded-lg ${
-            userInput.trim().toLowerCase() === currentWord.word.toLowerCase()
-              ? 'bg-green-100 text-green-700'
-              : 'bg-red-100 text-red-700'
-          }`}>
-            {userInput.trim().toLowerCase() === currentWord.word.toLowerCase() ? (
-              <div className="flex items-center justify-center">
-                <Check className="h-5 w-5 mr-2" />
-                Correct!
-              </div>
-            ) : (
-              <div>
-                <div className="flex items-center justify-center mb-1">
-                  <X className="h-5 w-5 mr-2" />
-                  Incorrect
-                </div>
-                <p className="text-sm">Answer: {currentWord.word}</p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {!showResult && (
-          <Button 
-            onClick={handleCheck} 
-            disabled={!userInput.trim()}
-            className="w-full"
-          >
-            Check Answer
-          </Button>
-        )}
+      {/* Keyboard hints */}
+      <div className="text-center text-xs text-muted-foreground space-y-1">
+        <p>Click card or press Space/Enter to flip</p>
+        <p>Use ← → arrows to navigate • Press P to play audio • Esc to exit</p>
       </div>
-    </Card>
+    </div>
   );
 }
